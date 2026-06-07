@@ -11,14 +11,55 @@ public final class DcsLocationsApiDtos {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record LocationsEnvelope(
-            Integer status,
-            String message,
+            Integer code,
+            String msg,
             LocationsData data
     ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record LocationsData(
-            @JsonProperty("total_items") Integer totalItems,
-            List<DcsCampusPoint> points
+            Integer total,
+            List<ParkPointRecord> records
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ParkPointRecord(
+            String parkPointId,
+            String dockName,
+            String dockShowName,
+            Double longitude,
+            Double latitude
+    ) {
+        public DcsCampusPoint toCampusPoint() {
+            String addr = (dockShowName != null && !dockShowName.isBlank()) ? dockShowName : dockName;
+            return new DcsCampusPoint(
+                    parkPointId,
+                    addr,
+                    new DcsCampusPoint.Coordinates(longitude, latitude),
+                    null
+            );
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SiteEnvelope(
+            Integer code,
+            String msg,
+            SiteData data
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SiteData(
+            Integer total,
+            List<SiteRecord> records
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record SiteRecord(
+            String siteId,
+            String siteName,
+            Double longitude,
+            Double latitude,
+            Integer siteStatus
     ) {}
 }

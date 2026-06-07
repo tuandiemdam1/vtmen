@@ -114,7 +114,7 @@ public class OrderController {
             return ResponseEntity.badRequest().build();
         }
 
-        return orderService.updateOrderStatusPendingToPlaced(orderCode)
+        return orderService.updateOrderStatusPendingToPlaced(orderCode, body.compartmentId())
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -144,7 +144,46 @@ public class OrderController {
     @PostMapping("/{id}/cancel")
     public void cancelOrder(@PathVariable String id) {
         orderService.cancelOrder(id);
+        try {
+            robotDispatchService.controlTask(id, "cancel");
+        } catch (Exception e) {
+            // Ignore if task doesn't exist on DCS
+        }
     }
 
-    public record StatusUpdateRequest(String status) {}
+    // POST /api/orders/{id}/cancel-delivery — Cancel delivery and return to charging point
+    @PostMapping("/{id}/cancel-delivery")
+    public void cancelDelivery(@PathVariable String id) {
+        // Cancel the current task on DCS
+        try {
+            robotDispatchService.controlTask(id, "cancel");
+        } catch (Exception e) {
+            // Ignore if task doesn't exist on DCS
+        }
+
+        // Return robot to charging point
+        try {
+            // Assuming default robot and site for now, or fetch from order if available
+            robotDispatchService.returnToChargingPoint(null, null);
+        } catch (Exception e) {
+            // Ignore if dispatch fails
+        }
+
+        // Mark order as cancelled
+        orderService.cancelOrder(id);
+    }
+
+    // POST /api/orders/{id}/pause — Pause a task
+    @PostMapping("/{id}/pause")
+    public void pauseTask(@PathVariable String id) {
+        robotDispatchService.controlTask(id, "pause");
+    }
+
+    // POST /api/orders/{id}/recover — Recover a task
+    @PostMapping("/{id}/recover")
+    public void recoverTask(@PathVariable String id) {
+        robotDispatchService.controlTask(id, "recover");
+    }
+
+    public record StatusUpdateRequest(String status, Integer compartmentId) {}
 }

@@ -1,8 +1,7 @@
 "use client";
 
-import { QRCodeSVG } from "qrcode.react";
 import { orderCompartmentMissing, orderNeedsCompartment, type Order } from "@/lib/orders";
-import { fetchActiveOrders, fetchOrderHistory, cancelOrder } from "@/lib/api";
+import { fetchActiveOrders, fetchOrderHistory, cancelOrder, cancelDelivery, confirmOrderPlaced } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -51,6 +50,8 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
     const [loading, setLoading] = useState(true);
     const [updateDrawerOpen, setUpdateDrawerOpen] = useState(false);
     const [cancelLoading, setCancelLoading] = useState(false);
+    const [confirmLoading, setConfirmLoading] = useState(false);
+    const [selectedCompartment, setSelectedCompartment] = useState<string>("1");
 
     const loadOrder = async () => {
         setLoading(true);
@@ -68,7 +69,7 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
                 setOrder(found);
             }
         } catch (err) {
-            console.error(err);
+            console.warn("OrderDetail fetch error:", err instanceof Error ? err.message : String(err));
         } finally {
             setLoading(false);
         }
@@ -111,9 +112,59 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
         }
     };
 
+    const handleCancelDelivery = async () => {
+        if (!order) return;
+        setCancelLoading(true);
+        try {
+            const success = await cancelDelivery(order.maDonHang);
+            if (success) {
+                toast.success(`Đã hủy giao hàng ${order.maDonHang} và gọi robot về sạc`, {
+                    className: "!text-amber-500 !border-amber-600",
+                });
+                // Navigate back after cancellation
+                if (window.history.length > 2) {
+                    router.back();
+                } else {
+                    router.replace('/postman/orders');
+                }
+            } else {
+                toast.error("Không thể hủy giao hàng. Vui lòng thử lại sau.");
+            }
+        } catch (error) {
+            toast.error("Đã xảy ra lỗi khi hủy giao hàng");
+        } finally {
+            setCancelLoading(false);
+        }
+    };
+
     const handleOrderUpdated = () => {
         // Re-fetch to show updated data
         loadOrder();
+    };
+
+    const handleConfirmPlaced = async () => {
+        if (!order) return;
+        const compId = parseInt(selectedCompartment, 10);
+        if (isNaN(compId)) {
+            toast.error("Vui lòng chọn ngăn tủ hợp lệ");
+            return;
+        }
+        setConfirmLoading(true);
+        try {
+            const success = await confirmOrderPlaced(order.maDonHang, compId);
+            if (success) {
+                toast.success(`Đã xác nhận giao hàng cho đơn ${order.maDonHang}`, {
+                    className: "!text-green-600 !border-green-600",
+                });
+                loadOrder();
+            } else {
+                toast.error("Không thể xác nhận giao hàng. Vui lòng thử lại sau.");
+            }
+        } catch (error) {
+            toast.error("Đã xảy ra lỗi khi xác nhận giao hàng");
+        } finally {
+            setConfirmLoading(false);
+        }
     };
 
     return (
@@ -169,21 +220,16 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
                         </div>
                     </div>
 
-                    {/* QR Code */}
+                    {/* PIN Code */}
                     <div className={`flex justify-center rounded-xl border border-border bg-white p-6 shadow-sm ${animationsEnabled ? 'animate-in fade-in zoom-in-95' : ''}`} style={animationsEnabled ? { animationDelay: "150ms", animationFillMode: "both" } : undefined}>
-                        <QRCodeSVG
-                            value={order ? JSON.stringify({
-                                maDonHang: order.maDonHang,
-                                sanPham: order.sanPham,
-                                tenKhachHang: order.tenKhachHang,
-                                sdt: order.sdt,
-                                diaChi: order.diaChi,
-                                trangThai: order.trangThai,
-                            }) : ""}
-                            size={200}
-                            level="H"
-                            includeMargin
-                        />
+                        <div className="text-center">
+                            <h3 className="mb-2 text-sm font-medium text-muted-foreground">Mã Nhận Hàng</h3>
+                            <div className="rounded-lg bg-primary/10 px-6 py-3">
+                                <span className="text-3xl font-mono font-bold tracking-widest text-primary">
+                                    {order.pinCode || "------"}
+                                </span>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Order Info */}
@@ -218,6 +264,63 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
 
                     {/* Action Buttons */}
                     <div className={order.trangThai === "cancelled" || order.trangThai === "delivered" ? "hidden" : `flex flex-wrap gap-2 items-center justify-end ${animationsEnabled ? 'animate-in slide-in-from-bottom-4 duration-200' : ''}`} style={order.trangThai === "pending" && animationsEnabled ? { animationDelay: "350ms", animationFillMode: "both" } : undefined}>
+                        {/* Confirm Placed Button with AlertDialog */}
+                        {order.trangThai === "pending" && (
+                            <AlertDialog>
+                                <AlertDialogTrigger
+                                    render={
+                                        <Button
+                                            variant="default"
+                                            size="lg"
+                                            className="bg-green-600 hover:bg-green-700 text-white"
+                                            disabled={confirmLoading}
+                                        >
+                                            {confirmLoading ? (
+                                                <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Đang xử lý...
+                                                </>
+                                            ) : (
+                                                "Xác nhận gửi hàng"
+                                            )}
+                                        </Button>
+                                    }
+                                />
+                                <AlertDialogContent size="sm">
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Xác nhận gửi hàng</AlertDialogTitle>
+                                        <AlertDialogDescription render={<div />}>
+                                            <div>
+                                                <p>Vui lòng chọn ngăn tủ để bỏ hàng vào cho đơn <span className="font-semibold text-foreground">{order.maDonHang}</span>.</p>
+                                                <div className="mt-4 text-left">
+                                                    <label className="block text-sm font-medium mb-1 text-foreground">Ngăn tủ số</label>
+                                                    <select 
+                                                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                                        value={selectedCompartment}
+                                                        onChange={(e) => setSelectedCompartment(e.target.value)}
+                                                    >
+                                                        <option value="1">Ngăn tủ 1</option>
+                                                        <option value="2">Ngăn tủ 2</option>
+                                                        <option value="3">Ngăn tủ 3</option>
+                                                        <option value="4">Ngăn tủ 4</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Hủy</AlertDialogCancel>
+                                        <AlertDialogAction
+                                            onClick={handleConfirmPlaced}
+                                            disabled={confirmLoading}
+                                            className="bg-green-600 hover:bg-green-700 text-white"
+                                        >
+                                            Xác nhận
+                                        </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                        )}
                         {/* Update Order Button */}
                         <Button
                             variant="default"
@@ -270,6 +373,51 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
+
+                        {/* Cancel Delivery Button with AlertDialog */}
+                        {order.trangThai === "shipping" && (
+                            <AlertDialog>
+                                <AlertDialogTrigger
+                                    render={
+                                        <Button
+                                            variant="outline"
+                                            size="lg"
+                                            className="border-amber-300 text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                                        >
+                                            Hủy giao hàng
+                                        </Button>
+                                    }
+                                />
+                                <AlertDialogContent size="sm">
+                                    <AlertDialogHeader>
+                                        <AlertDialogMedia className="bg-amber-100 text-amber-600">
+                                            <AlertTriangle className="h-5 w-5" />
+                                        </AlertDialogMedia>
+                                        <AlertDialogTitle>Hủy giao hàng?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            Bạn có chắc chắn muốn hủy giao hàng cho đơn <span className="font-semibold text-foreground">{order.maDonHang}</span>? Robot sẽ hủy nhiệm vụ hiện tại và tự động quay về điểm sạc.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Quay lại</AlertDialogCancel>
+                                        <AlertDialogAction
+                                            onClick={handleCancelDelivery}
+                                            disabled={cancelLoading}
+                                            className="bg-amber-600 hover:bg-amber-700"
+                                        >
+                                            {cancelLoading ? (
+                                                <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Đang xử lý...
+                                                </>
+                                            ) : (
+                                                "Xác nhận hủy"
+                                            )}
+                                        </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                        )}
                     </div>
 
                     {/* Update Order Drawer */}

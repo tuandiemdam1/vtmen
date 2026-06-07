@@ -11,5 +11,9 @@ public interface OrderRepository extends MongoRepository<OrderModel, String> {
 
     List<OrderModel> findByStatusNot(String status);
     
+    List<OrderModel> findByCompartmentId(Integer compartmentId);
+    
     java.util.Optional<OrderModel> findByOrderCode(String orderCode);
+
+    java.util.Optional<OrderModel> findByPinCode(String pinCode);
 }

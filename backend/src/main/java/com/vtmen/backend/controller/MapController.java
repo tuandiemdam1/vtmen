@@ -47,6 +47,19 @@ public class MapController {
         }
     }
 
+    @GetMapping("/sites")
+    public ResponseEntity<DcsLocationsApiDtos.SiteEnvelope> dcsSites() {
+        try {
+            DcsLocationsApiDtos.SiteEnvelope env = dcsRemoteLocationsClient.fetchSites();
+            if (env == null) {
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+            }
+            return ResponseEntity.ok(env);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+    }
+
     @GetMapping("/points")
     public List<MapPointResponse> points(
             @RequestParam(value = "map_name", required = false) String mapName

@@ -49,7 +49,7 @@ export default function OrderCard({ onDataChange }: { onDataChange?: () => void 
                 const data = await fetchActiveOrders();
                 setOrders(data);
             } catch (err) {
-                console.error(err);
+                console.warn("loadData error:", err instanceof Error ? err.message : String(err));
             } finally {
                 setLoading(false);
             }
@@ -70,7 +70,7 @@ export default function OrderCard({ onDataChange }: { onDataChange?: () => void 
                 });
 
             if (statusChanged && onDataChange) {
-                onDataChange();
+                setTimeout(() => onDataChange(), 0);
             }
 
             return updatedOrders;
@@ -118,6 +118,11 @@ export default function OrderCard({ onDataChange }: { onDataChange?: () => void 
                                     <span className="text-muted-foreground">{order.tenKhachHang}</span>
                                 </ItemTitle>
                                 <ItemDescription>{order.sanPham}</ItemDescription>
+                                {order.pinCode && (
+                                    <p className="mt-1 flex w-max items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-mono font-medium text-primary">
+                                        PIN: {order.pinCode}
+                                    </p>
+                                )}
                                 {orderNeedsCompartment(order.trangThai) && (
                                     <p
                                         className={`mt-0.5 text-[11px] font-medium ${

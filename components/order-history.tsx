@@ -65,7 +65,7 @@ export default function OrderHistory() {
                     return data;
                 });
             } catch (err) {
-                console.error(err);
+                console.warn("OrderHistory fetch error:", err instanceof Error ? err.message : String(err));
             } finally {
                 if (isMounted) {
                     setLoading(false);

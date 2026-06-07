@@ -23,8 +23,10 @@ export function LocationPicker({
     const selected = locations.find((l) => l.address === value);
 
     const filtered = locations.filter((l) => {
+        if (!query) return true;
         const q = query.toLowerCase();
-        return l.name.toLowerCase().includes(q) || l.address.toLowerCase().includes(q);
+        const searchStr = `${l.name || ""} ${l.address || ""} ${l.dockName || ""} ${l.dockShowName || ""}`.toLowerCase();
+        return searchStr.includes(q);
     });
 
     useEffect(() => {
@@ -62,7 +64,9 @@ export function LocationPicker({
                 {loading ? (
                     <span className="text-muted-foreground">Đang tải địa điểm…</span>
                 ) : selected ? (
-                    <span className="truncate text-foreground">{selected.address}</span>
+                    <span className="truncate text-foreground">
+                        {selected.dockShowName && selected.dockName ? `${selected.dockShowName} - ${selected.dockName}` : (selected.dockShowName || selected.dockName || selected.address)}
+                    </span>
                 ) : (
                     <span className="text-muted-foreground">Tìm theo tên hoặc địa chỉ...</span>
                 )}
@@ -92,7 +96,7 @@ export function LocationPicker({
                             onClick={(e) => e.stopPropagation()}
                         />
                     </div>
-                    <ul className="max-h-52 overflow-y-auto p-1">
+                    <ul className="max-h-80 overflow-y-auto p-1">
                         {filtered.length === 0 ? (
                             <li className="py-4 text-center text-sm text-muted-foreground">
                                 Không tìm thấy địa điểm
@@ -109,8 +113,10 @@ export function LocationPicker({
                                         value === loc.address ? "bg-accent/50" : ""
                                     }`}
                                 >
-                                    <span className="font-medium leading-snug">{loc.name}</span>
-                                    <span className="text-xs text-muted-foreground leading-snug">{loc.address}</span>
+                                    <span className="font-medium leading-snug">
+                                        {loc.dockShowName && loc.dockName ? `${loc.dockShowName} - ${loc.dockName}` : (loc.dockShowName || loc.dockName || loc.address)}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground leading-snug">{loc.name}</span>
                                 </li>
                             ))
                         )}

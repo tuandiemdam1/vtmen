@@ -15,7 +15,10 @@ const WS_BASE = process.env.NEXT_PUBLIC_WS_URL ||
 export function useOrdersWebSocket(onUpdate: (orders: Order[]) => void) {
     const [connected, setConnected] = useState(false);
     const onUpdateRef = useRef(onUpdate);
-    onUpdateRef.current = onUpdate;
+
+    useEffect(() => {
+        onUpdateRef.current = onUpdate;
+    }, [onUpdate]);
 
     useEffect(() => {
         const client = new Client({

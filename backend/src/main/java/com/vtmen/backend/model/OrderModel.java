@@ -12,6 +12,7 @@ public class OrderModel {
     @Id
     private String id;
     private String orderCode;
+    private String pinCode;
     private String fullName;
     private String phone;
     private String address;
@@ -29,6 +30,9 @@ public class OrderModel {
     private Integer compartmentId;
     private LocalDateTime depositedTime;
     private LocalDateTime arrivalTime;
+    private String robotId;
+    private String capacityResourceId;
+    private String capacityResourceName;
 
     public OrderModel() {
         this.createdTime = LocalDateTime.now();
@@ -50,6 +54,14 @@ public class OrderModel {
 
     public void setOrderCode(String orderCode) {
         this.orderCode = orderCode;
+    }
+
+    public String getPinCode() {
+        return pinCode;
+    }
+
+    public void setPinCode(String pinCode) {
+        this.pinCode = pinCode;
     }
 
     public String getFullName() {
@@ -154,5 +166,29 @@ public class OrderModel {
 
     public void setArrivalTime(LocalDateTime arrivalTime) {
         this.arrivalTime = arrivalTime;
+    }
+
+    public String getRobotId() {
+        return robotId;
+    }
+
+    public void setRobotId(String robotId) {
+        this.robotId = robotId;
+    }
+
+    public String getCapacityResourceId() {
+        return capacityResourceId;
+    }
+
+    public void setCapacityResourceId(String capacityResourceId) {
+        this.capacityResourceId = capacityResourceId;
+    }
+
+    public String getCapacityResourceName() {
+        return capacityResourceName;
+    }
+
+    public void setCapacityResourceName(String capacityResourceName) {
+        this.capacityResourceName = capacityResourceName;
     }
 }

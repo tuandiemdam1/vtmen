@@ -20,10 +20,22 @@ import { createOrder, type CreateOrderPayload, DEFAULT_DCS_MAP_NAME } from "@/li
 import { useMapLocations } from "@/hooks/use-map-locations";
 import { LocationPicker } from "@/components/location-picker";
 
-export default function CreateOrderDrawer({ onCreated }: { onCreated?: () => void }) {
+export default function CreateOrderDrawer({ 
+    siteId,
+    onCreated 
+}: { 
+    siteId?: string | null;
+    onCreated?: () => void;
+}) {
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
-    const { locations, loading: locationsLoading } = useMapLocations({ enabled: open });
+    // Use the selected siteId from Postman, or fallback to default
+    const effectiveSiteId = siteId || DEFAULT_DCS_MAP_NAME;
+    const { locations, loading: locationsLoading } = useMapLocations({ 
+        enabled: open, 
+        mapName: effectiveSiteId 
+    });
+    
     const [form, setForm] = useState<CreateOrderPayload>({
         fullName: "",
         phone: "",
@@ -46,11 +58,11 @@ export default function CreateOrderDrawer({ onCreated }: { onCreated?: () => voi
             const loc = locations.find((l) => l.address === form.address.trim());
             const result = await createOrder({
                 ...form,
-                map_name: DEFAULT_DCS_MAP_NAME,
+                map_name: effectiveSiteId,
                 ...(loc ? { destinationName: loc.name } : {}),
             });
             if (result) {
-                toast.success(`Đã tạo thành công đơn hàng ${result.orderCode || result.id || ""}`, {
+                toast.success(`Đã tạo đơn ${result.orderCode || result.id || ""}. Mã nhận hàng (PIN): ${result.pinCode || "---"}`, {
                     className: "!text-green-500 !border-green-600",
                 });
                 setOpen(false);

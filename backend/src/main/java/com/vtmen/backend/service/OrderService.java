@@ -90,11 +90,14 @@ public class OrderService {
                 .filter(order -> "pending".equalsIgnoreCase(order.getStatus()));
     }
 
-    public Optional<OrderModel> updateOrderStatusPendingToPlaced(String orderCode) {
+    public Optional<OrderModel> updateOrderStatusPendingToPlaced(String orderCode, Integer compartmentId) {
         return orderRepository.findByOrderCode(orderCode)
                 .filter(order -> "pending".equalsIgnoreCase(order.getStatus()))
                 .map(order -> {
                     order.setStatus("placed");
+                    if (compartmentId != null) {
+                        order.setCompartmentId(compartmentId);
+                    }
                     OrderModel saved = orderRepository.save(order);
                     publishActiveOrders();
                     return saved;
@@ -118,24 +121,10 @@ public class OrderService {
                 });
     }
 
-    public record QrPickupResult(String orderCode, Integer compartmentId) {}     // Pickup scan flow:
-     // - Only for shipping orders that already have a compartment.
-     // - Return orderCode + compartmentId for DCS open-compartment action.
-     // - Then mark order delivered and clear compartment.    public Optional<QrPickupResult> completePickupByQr(String orderCode) {
-        return orderRepository.findByOrderCode(orderCode)
-                .filter(order -> "shipping".equalsIgnoreCase(order.getStatus()) && order.getCompartmentId() != null)
-                .map(order -> {
-                    Integer openingCompartmentId = order.getCompartmentId();
-                    order.setStatus("delivered");
-                    order.setCompartmentId(null);
-                    order.setCompletedTime(LocalDateTime.now());
-                    orderRepository.save(order);
-                    publishActiveOrders();
-                    return new QrPickupResult(order.getOrderCode(), openingCompartmentId);
-                });
-    }     // DCS deposit-closed: never changes order status.
-     // If the order has no compartment_id, requires request compartment_id — sets compartment + deposited time, message "Placed successfully".
-     // If the order already has a compartment_id, clears compartment_id and deposited time (locker released).    public Optional<String> applyDepositClosed(String orderCode, Integer requestCompartmentId, OffsetDateTime closedAt) {
+    // DCS deposit-closed: never changes order status.
+    // If the order has no compartment_id, requires request compartment_id — sets compartment + deposited time, message "Placed successfully".
+    // If the order already has a compartment_id, clears compartment_id and deposited time (locker released).
+    public Optional<String> applyDepositClosed(String orderCode, Integer requestCompartmentId, OffsetDateTime closedAt) {
         Optional<OrderModel> eligible = orderRepository.findByOrderCode(orderCode)
                 .filter(order -> order.getStatus() == null
                         || (!"cancelled".equalsIgnoreCase(order.getStatus())
@@ -169,22 +158,94 @@ public class OrderService {
         return Optional.of("Compartment removed");
     }
 
-    public Optional<OrderModel> markArrived(String orderCode, OffsetDateTime arrivalAt) {
-        return orderRepository.findByOrderCode(orderCode)
-                .filter(order -> order.getStatus() == null
-                        || (!"cancelled".equalsIgnoreCase(order.getStatus())
-                        && !"delivered".equalsIgnoreCase(order.getStatus())))
-                .map(order -> {
-                    if (arrivalAt != null) {
-                        order.setArrivalTime(arrivalAt.toLocalDateTime());
-                    } else {
-                        order.setArrivalTime(LocalDateTime.now());
-                    }
-                    OrderModel saved = orderRepository.save(order);
-                    publishActiveOrders();
-                    return saved;
-                });
+    // --- New Webhook handlers ---
+    public Optional<OrderModel> handleDoorClosed(Integer compartmentId, String capacityResourceId, OffsetDateTime closedAt) {
+        if (compartmentId == null) return Optional.empty();
+        List<OrderModel> orders = orderRepository.findByCompartmentId(compartmentId);
+
+        // Goods-in: order is placed
+        Optional<OrderModel> placedOrder = orders.stream().filter(o -> "placed".equalsIgnoreCase(o.getStatus())).findFirst();
+        if (placedOrder.isPresent()) {
+            OrderModel order = placedOrder.get();
+            if (capacityResourceId != null && !capacityResourceId.isBlank()) order.setCapacityResourceId(capacityResourceId);
+            order.setDepositedTime(closedAt != null ? closedAt.toLocalDateTime() : LocalDateTime.now());
+            OrderModel saved = orderRepository.save(order);
+            publishActiveOrders();
+            return Optional.of(saved);
+        }
+
+        // Goods-out: order is shipping
+        Optional<OrderModel> shippingOrder = orders.stream().filter(o -> "shipping".equalsIgnoreCase(o.getStatus())).findFirst();
+        if (shippingOrder.isPresent()) {
+            OrderModel order = shippingOrder.get();
+            if (capacityResourceId != null && !capacityResourceId.isBlank()) order.setCapacityResourceId(capacityResourceId);
+            order.setStatus("delivered");
+            order.setCompartmentId(null);
+            order.setCompletedTime(closedAt != null ? closedAt.toLocalDateTime() : LocalDateTime.now());
+            OrderModel saved = orderRepository.save(order);
+            publishActiveOrders();
+            return Optional.of(saved);
+        }
+        return Optional.empty();
     }
+
+    public Optional<OrderModel> handleArrived(Integer compartmentId, OffsetDateTime arrivalAt) {
+        if (compartmentId == null) {
+             // If compartmentId is null, we just find any shipping order without arrivalTime
+             return getShippingOrders().stream()
+                     .filter(o -> o.getArrivalTime() == null)
+                     .findFirst()
+                     .map(order -> {
+                         order.setArrivalTime(arrivalAt != null ? arrivalAt.toLocalDateTime() : LocalDateTime.now());
+                         OrderModel saved = orderRepository.save(order);
+                         publishActiveOrders();
+                         return saved;
+                     });
+        }
+
+        List<OrderModel> orders = orderRepository.findByCompartmentId(compartmentId);
+        Optional<OrderModel> shippingOrder = orders.stream().filter(o -> "shipping".equalsIgnoreCase(o.getStatus())).findFirst();
+        if (shippingOrder.isPresent()) {
+            OrderModel order = shippingOrder.get();
+            order.setArrivalTime(arrivalAt != null ? arrivalAt.toLocalDateTime() : LocalDateTime.now());
+            OrderModel saved = orderRepository.save(order);
+            publishActiveOrders();
+            return Optional.of(saved);
+        }
+        return Optional.empty();
+    }
+
+    // Verify PIN handler
+    public Optional<VerifyPinResult> verifyPin(String pinCode, String capacityResourceId, String capacityResourceName) {
+        Optional<OrderModel> orderOpt = orderRepository.findByPinCode(pinCode);
+        if (orderOpt.isEmpty()) return Optional.empty();
+        OrderModel order = orderOpt.get();
+
+        if (capacityResourceId != null && !capacityResourceId.isBlank()) {
+            order.setCapacityResourceId(capacityResourceId);
+        }
+        if (capacityResourceName != null && !capacityResourceName.isBlank()) {
+            order.setCapacityResourceName(capacityResourceName);
+        }
+
+        if ("pending".equalsIgnoreCase(order.getStatus()) || "placed".equalsIgnoreCase(order.getStatus())) {
+            if ("pending".equalsIgnoreCase(order.getStatus())) {
+                order.setStatus("placed");
+            }
+            if (order.getCompartmentId() == null) {
+                // Assign a compartment (dummy logic, pick 1)
+                order.setCompartmentId(1);
+            }
+            orderRepository.save(order);
+            publishActiveOrders();
+            return Optional.of(new VerifyPinResult(order.getOrderCode(), order.getCompartmentId(), "POSTMAN"));
+        } else if ("shipping".equalsIgnoreCase(order.getStatus())) {
+            return Optional.of(new VerifyPinResult(order.getOrderCode(), order.getCompartmentId(), "CUSTOMER"));
+        }
+        return Optional.empty();
+    }
+
+    public record VerifyPinResult(String orderCode, Integer compartmentId, String role) {}
 
     // After DCS accepts sendtask (SUCCESS), move placed → shipping.
     public Optional<OrderModel> markOrderShipping(String orderCode) {
@@ -245,6 +306,7 @@ public class OrderService {
             order.setMapName(order.getMapName().trim());
         }
         order.setOrderCode("SK" + UUID.randomUUID().toString().replaceAll("-", "").substring(0, 8).toUpperCase());
+        order.setPinCode(String.format("%06d", new java.util.Random().nextInt(1000000)));
         OrderModel saved = orderRepository.save(order);
         publishActiveOrders();
         return saved;

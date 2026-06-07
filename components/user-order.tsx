@@ -126,6 +126,11 @@ function OrderCardItem({
                         {order.maDonHang}
                     </ItemTitle>
                     <ItemDescription>{order.sanPham}</ItemDescription>
+                    {order.pinCode && (
+                        <p className="mt-1 flex w-max items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-mono font-medium text-primary">
+                            PIN: {order.pinCode}
+                        </p>
+                    )}
                     {orderNeedsCompartment(order.trangThai) && (
                         <p
                             className={`mt-1 text-xs font-medium ${
@@ -164,7 +169,7 @@ function OrderCardItem({
                     )}
 
                     {order.trangThai === "shipping" && (
-                        <Button size="lg" className="w-full" render={
+                        <Button size="lg" className="w-full" nativeButton={false} render={
                             <Link href={`/user/orders/${order.maDonHang}`} />
                         }>
                             Track
@@ -172,7 +177,7 @@ function OrderCardItem({
                     )}
 
                     {order.trangThai === "delivered" && (
-                        <Button variant="outline" size="lg" className="w-full" render={
+                        <Button variant="outline" size="lg" className="w-full" nativeButton={false} render={
                             <Link href={`/user/orders/${order.maDonHang}`} />
                         }>
                             View E-Receipt
@@ -199,7 +204,7 @@ export default function UserOrderList() {
                 const data = await fetchActiveOrders();
                 setOrders(data);
             } catch (err) {
-                console.error(err);
+                console.warn("UserOrder fetch error:", err instanceof Error ? err.message : String(err));
             } finally {
                 setLoading(false);
             }

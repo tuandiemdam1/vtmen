@@ -15,9 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
+import java.util.Optional;
+import com.vtmen.backend.service.RobotDispatchService;
 
 @RestController
-@RequestMapping("/api/dcs")
+@RequestMapping("/api/v1/dcs")
 public class DcsController {
 
     @Autowired
@@ -32,61 +34,57 @@ public class DcsController {
     @Autowired
     private DcsApiProperties dcsApiProperties;
 
-    // POST /api/dcs/qr-scanned — Robot quét QR thành công (DCS gọi vào vtmen)
-    // Returns action ACCEPT_DEPOSIT or REJECT for DCS to act immediately.
-    @PostMapping("/qr-scanned")
-    public ResponseEntity<QrScannedResponse> qrScanned(@RequestBody QrScannedRequest body) {
-        if (body == null) {
-            return ResponseEntity.badRequest().body(QrScannedResponse.reject("Missing body"));
-        }
-        String orderCode = body.qrContent();
-        if (orderCode == null || orderCode.isBlank()) {
-            return ResponseEntity.badRequest().body(QrScannedResponse.reject("Missing qr_content"));
+    @Autowired
+    private RobotDispatchService robotDispatchService;
+
+    @PostMapping("/auth/verify-pin")
+    public ResponseEntity<VerifyPinResponse> verifyPin(@RequestBody VerifyPinRequest request) {
+        if (request == null || request.pinCode() == null || request.pinCode().isBlank()) {
+            return ResponseEntity.badRequest().body(new VerifyPinResponse(400, "Missing pinCode", new VerifyPinData(false, null, null, null)));
         }
 
-        // Pickup flow: shipping + has compartment => tell DCS which compartment to open,
-        // then order is updated to delivered and compartment is cleared.
-        var pickupResult = orderService.completePickupByQr(orderCode);
-        if (pickupResult.isPresent()) {
-            return ResponseEntity.ok(QrScannedResponse.pickUpResponse(
-                    pickupResult.get().orderCode(),
-                    pickupResult.get().compartmentId()
-            ));
+        Optional<OrderService.VerifyPinResult> result = orderService.verifyPin(
+            request.pinCode(), request.capacityResourceId(), request.capacityResourceName()
+        );
+        if (result.isPresent()) {
+            OrderService.VerifyPinResult data = result.get();
+            try {
+                // Call DCS to open door
+                robotDispatchService.openCompartment(request.capacityResourceId(), data.compartmentId());
+            } catch (Exception e) {
+                // Ignore open door failure for now, or log it
+            }
+            return ResponseEntity.ok(new VerifyPinResponse(200, "PIN hợp lệ",
+                    new VerifyPinData(true, data.orderCode(), data.compartmentId(), data.role())));
+        } else {
+            return ResponseEntity.ok(new VerifyPinResponse(400, "Mã PIN không hợp lệ",
+                    new VerifyPinData(false, null, null, null)));
         }
-
-        return orderService.acceptDepositByQr(orderCode)
-                .map(order -> ResponseEntity.ok(QrScannedResponse.accept(order)))
-                .orElseGet(() -> ResponseEntity.badRequest().body(QrScannedResponse.reject("Mã QR không hợp lệ hoặc đã bị hủy")));
     }
 
-    // POST /api/dcs/deposit-closed — Đã nạp hàng xong / cửa tủ đóng (DCS gọi vào vtmen).
-    // Does not change order status. No compartment yet → set compartment + time, message "Placed successfully".
-    // Already has compartment → clear compartment + deposited time, message "Compartment removed".
-    @PostMapping("/deposit-closed")
-    public ResponseEntity<SimpleResponse> depositClosed(@RequestBody DepositClosedRequest body) {
-        if (body == null) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(400, "Missing body"));
-        }
-        String orderCode = body.orderId();
-        if (orderCode == null || orderCode.isBlank()) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(400, "Missing order_id"));
+    @PostMapping("/webhook/event")
+    public ResponseEntity<SimpleResponse> webhookEvent(@RequestBody WebhookEventRequest request) {
+        if (request == null || request.eventType() == null) {
+            return ResponseEntity.badRequest().body(new SimpleResponse(400, "Missing eventType"));
         }
 
-        try {
-            return orderService.applyDepositClosed(orderCode, body.compartmentId(), body.closedAt())
-                    .map(msg -> ResponseEntity.ok(new SimpleResponse(200, msg)))
-                    .orElseGet(() -> ResponseEntity.status(404).body(
-                            new SimpleResponse(404, "Order not found or not eligible for deposit")));
-        } catch (ResponseStatusException ex) {
-            int code = ex.getStatusCode().value();
-            String reason = ex.getReason();
-            return ResponseEntity.status(ex.getStatusCode()).body(
-                    new SimpleResponse(code, reason != null ? reason : "Bad request"));
+        switch (request.eventType()) {
+            case "DOOR_CLOSED":
+                orderService.handleDoorClosed(request.compartmentId(), request.capacityResourceId(), request.timestamp());
+                break;
+            case "ARRIVED_DESTINATION":
+                orderService.handleArrived(request.compartmentId(), request.timestamp());
+                break;
+            case "ERROR":
+                // Handle error if needed
+                break;
+            default:
+                break;
         }
+
+        return ResponseEntity.ok(new SimpleResponse(200, "Event received successfully"));
     }
-     // VtMen: fetch DCS map points, refresh destination cache, update every order's {@code destinationName} +
-     // {@code address} when a POI matches.
-     // <p>Optional body: {@code { "map_name": "Other map" }} — otherwise uses {@code vtmen.dcs.map-name}.
+
     @PostMapping("/sync-order-locations-from-dcs")
     public ResponseEntity<OrderLocationSyncResponse> syncOrderLocationsFromDcs(
             @RequestBody(required = false) SyncOrderLocationsRequest body
@@ -133,82 +131,36 @@ public class DcsController {
             String message
     ) {}
 
-    // POST /api/dcs/arrival-notify — Báo cáo đến (DCS gọi vào vtmen)
-    @PostMapping("/arrival-notify")
-    public ResponseEntity<SimpleResponse> arrivalReport(@RequestBody ArrivalReportRequest body) {
-        if (body == null) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(400, "Missing body"));
-        }
-        String orderCode = body.orderId();
-        if (orderCode == null || orderCode.isBlank()) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(400, "Missing order_id"));
-        }
-        return orderService.markArrived(orderCode, body.arrivalAt())
-                .map(o -> ResponseEntity.ok(new SimpleResponse(200, "Arrived status updated. Notifying user.")))
-                .orElseGet(() -> ResponseEntity.status(404).body(
-                        new SimpleResponse(404, "Order not found or not eligible for arrival update")));
-    }
-
-    public record QrScannedRequest(
-            @JsonProperty("event_id") String eventId,
-            @JsonProperty("robot_id") String robotId,
-            @JsonProperty("qr_content") String qrContent,
-            @JsonProperty("scanned_at") OffsetDateTime scannedAt
+    public record VerifyPinRequest(
+            String pinCode,
+            String capacityResourceId,
+            String capacityResourceName,
+            OffsetDateTime timestamp
     ) {}
 
-    public record DepositClosedRequest(
-            @JsonProperty("event_id") String eventId,
-            @JsonProperty("robot_id") String robotId,
-            @JsonProperty("order_id") String orderId,
-            @JsonProperty("compartment_id") Integer compartmentId,
-            @JsonProperty("closed_at") OffsetDateTime closedAt
+    public record VerifyPinData(
+            boolean isValid,
+            String orderCode,
+            Integer compartmentId,
+            String role
     ) {}
 
-    public record QrScannedResponse(
-            int status,
-            String action,
-            @JsonProperty("order_id") String orderId,
-            @JsonProperty("compartment_id") Integer compartmentId,
-            String message
-    ) {
-        static QrScannedResponse accept(OrderModel order) {
-            return new QrScannedResponse(
-                    200,
-                    "ACCEPT_DEPOSIT",
-                    order.getOrderCode(),
-                    null,
-                    "Mã QR hợp lệ, cho phép cất hàng"
-            );
-        }
-
-        static QrScannedResponse reject(String message) {
-            return new QrScannedResponse(
-                    400,
-                    "REJECT",
-                    null,
-                    null,
-                    message
-            );
-        }
-
-        static QrScannedResponse pickUpResponse(String orderCode, Integer compartmentId) {
-            return new QrScannedResponse(
-                200,
-                "OPEN_COMPARTMENT",
-                orderCode,
-                compartmentId,
-                "Mã QR hợp lệ, mở tủ để nhận hàng"
-        );
-        }
-    }
-
-    public record ArrivalReportRequest(
-        @JsonProperty("event_id") String eventId,
-        @JsonProperty("robot_id") String robotId,
-        @JsonProperty("order_id") String orderId,
-        @JsonProperty("arrival_at") OffsetDateTime arrivalAt
+    public record VerifyPinResponse(
+            int code,
+            String message,
+            VerifyPinData data
     ) {}
 
-    public record SimpleResponse(int status, String message) {}
+    public record WebhookEventRequest(
+            String capacityResourceId,
+            String capacityResourceName,
+            String eventType,
+            Integer compartmentId,
+            Integer batteryLevel,
+            Object location,
+            OffsetDateTime timestamp
+    ) {}
+
+    public record SimpleResponse(int code, String message) {}
 }
 

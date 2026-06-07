@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowLeft, MessageCircle, Phone, Package, Clock, CheckCircle2, Truck, Send, Box, Loader2 } from "lucide-react";
+import { ArrowLeft, MessageCircle, Phone, Package, Clock, CheckCircle2, Truck, Send, Box, Loader2, QrCode } from "lucide-react";
 import { orderCompartmentMissing, orderNeedsCompartment, type Order } from "@/lib/orders";
-import { dispatchRobot, fetchActiveOrders, fetchOrderHistory } from "@/lib/api";
+import { dispatchRobot, fetchActiveOrders, fetchOrderHistory, completeOrderApi } from "@/lib/api";
 import { useOrdersWebSocket } from "@/hooks/use-orders-websocket";
 import { toast } from "sonner";
 import {
@@ -12,7 +12,6 @@ import {
     userToastSuccess,
     userToastWarn,
 } from "@/lib/user-toast-styles";
-import { QRCodeSVG } from "qrcode.react";
 import { useState, useEffect } from "react";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 
@@ -40,7 +39,6 @@ export default function UserOrderDetail({ orderId }: { orderId: string }) {
     const { animationsEnabled } = useAnimations();
     const [order, setOrder] = useState<Order | null>(null);
     const [loading, setLoading] = useState(true);
-    const [showQR, setShowQR] = useState(false);
     const [callShipLoading, setCallShipLoading] = useState(false);
 
     useEffect(() => {
@@ -62,7 +60,7 @@ export default function UserOrderDetail({ orderId }: { orderId: string }) {
                     setOrder(found);
                 }
             } catch (err) {
-                console.error(err);
+                console.warn("UserOrderDetail fetch error:", err instanceof Error ? err.message : String(err));
             } finally {
                 setLoading(false);
             }
@@ -96,6 +94,24 @@ export default function UserOrderDetail({ orderId }: { orderId: string }) {
                 e instanceof Error ? e.message : "Không gọi được giao hàng",
                 userToastError
             );
+        } finally {
+            setCallShipLoading(false);
+        }
+    };
+
+    const handleConfirmTakeOut = async () => {
+        if (!order) return;
+        setCallShipLoading(true);
+        try {
+            const success = await completeOrderApi(order.maDonHang);
+            if (success) {
+                toast.success("Đã xác nhận lấy hàng thành công", userToastSuccess);
+                setOrder((prev) => prev ? { ...prev, trangThai: "delivered" } : null);
+            } else {
+                toast.error("Không thể xác nhận lấy hàng", userToastError);
+            }
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Đã xảy ra lỗi", userToastError);
         } finally {
             setCallShipLoading(false);
         }
@@ -275,58 +291,56 @@ export default function UserOrderDetail({ orderId }: { orderId: string }) {
                         ))}
                     </div>
 
-                    {/* QR / Action */}
-                    {(order.trangThai === "shipping" || order.trangThai === "placed") && (
-                        <div>
-                            {!showQR ? (
-                                <>
-                                    {order.trangThai === "placed" && (
-                                        <button
-                                            type="button"
-                                            disabled={callShipLoading || orderCompartmentMissing(order)}
-                                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
-                                            onClick={handleCallDelivery}
-                                        >
-                                            {callShipLoading ? (
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                            ) : (
-                                                <Send className="h-4 w-4" />
-                                            )}
-                                            Gọi giao hàng
-                                        </button>
-                                    )}
-                                    {order.trangThai === "shipping" && (
-                                        <button
-                                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98]"
-                                            onClick={() => setShowQR(true)}
-                                        >
-                                            <Package className="h-4 w-4" />
-                                            Mở QR để nhận hàng
-                                        </button>
-                                    )}
-                                </>
+                    {/* Action */}
+                    {order.trangThai === "placed" && (
+                        <button
+                            type="button"
+                            disabled={callShipLoading || orderCompartmentMissing(order)}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+                            onClick={handleCallDelivery}
+                        >
+                            {callShipLoading ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                                <div className={`flex flex-col items-center gap-4 rounded-xl border border-primary/20 bg-primary/5 p-6 ${animationsEnabled ? 'animate-in fade-in zoom-in-95' : ''}`}>
-                                    <p className="text-sm font-medium text-primary">Đưa mã QR này cho robot để mở tủ</p>
-                                    <div className="rounded-xl bg-white p-4 shadow-md">
-                                        <QRCodeSVG
-                                            value={order ? JSON.stringify({
-                                                action: "open_locker",
-                                                maDonHang: order.maDonHang,
-                                                tenKhachHang: order.tenKhachHang,
-                                                sdt: order.sdt,
-                                            }) : ""}
-                                            size={180}
-                                            level="H"
-                                            includeMargin
-                                        />
-                                    </div>
-                                    <p className="text-center text-xs text-muted-foreground leading-relaxed">
-                                        Quét QR → Mở tủ → Đóng tủ = Giao hàng thành công!<br />
-                                        Robot sẽ tự quay về trạm.
-                                    </p>
-                                </div>
+                                <Send className="h-4 w-4" />
                             )}
+                            Gọi giao hàng
+                        </button>
+                    )}
+
+                    {order.trangThai === "shipping" && order.arrivalTime && (
+                        <button
+                            type="button"
+                            disabled={callShipLoading}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-green-700 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+                            onClick={handleConfirmTakeOut}
+                        >
+                            {callShipLoading ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <CheckCircle2 className="h-4 w-4" />
+                            )}
+                            Xác nhận lấy hàng ra
+                        </button>
+                    )}
+                    
+                    {/* PIN Code Display */}
+                    {order.trangThai !== "delivered" && order.trangThai !== "cancelled" && (
+                        <div className={`mt-auto pt-6 ${animationsEnabled ? 'animate-in fade-in slide-in-from-bottom-5 duration-300' : ''}`} style={animationsEnabled ? { animationDelay: "300ms", animationFillMode: "both" } : undefined}>
+                            {order.trangThai === "pending" || order.trangThai === "placed" || order.trangThai === "shipping" ? (
+                                <div className="rounded-2xl border border-border bg-card p-6 shadow-sm text-center">
+                                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+                                        <QrCode className="h-7 w-7" />
+                                    </div>
+                                    <h3 className="mb-2 text-lg font-bold text-foreground">Mã Lấy Hàng Của Bạn</h3>
+                                    <div className="mb-4 inline-block rounded-lg bg-muted px-6 py-3">
+                                        <span className="text-3xl font-mono font-bold tracking-widest text-primary">
+                                            {order.pinCode || "------"}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm font-medium text-muted-foreground">Nhập mã PIN này trên màn hình robot để mở tủ nhận hàng</p>
+                                </div>
+                            ) : null}
                         </div>
                     )}
 

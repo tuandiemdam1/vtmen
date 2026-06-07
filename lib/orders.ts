@@ -7,6 +7,7 @@ export type OrderStatus =
 
 export type Order = {
     maDonHang: string;
+    pinCode?: string;
     sanPham: string;
     tenKhachHang: string;
     sdt: string;
@@ -19,6 +20,7 @@ export type Order = {
     soLuong?: number; // Added new field for quantity
     // Set when DCS reports deposit closed; required for placed/shipping UX
     compartmentId?: number | null;
+    arrivalTime?: string; // Khi robot đến nơi
 };
 
 export function orderNeedsCompartment(status: OrderStatus): boolean {

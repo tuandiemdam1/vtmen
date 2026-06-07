@@ -1,6 +1,8 @@
 package com.vtmen.backend.service;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vtmen.backend.config.RobotTaskProperties;
 import com.vtmen.backend.model.OrderModel;
 import com.vtmen.backend.repository.OrderRepository;
@@ -59,34 +61,50 @@ public class RobotDispatchService {
                     "compartment_id is required — assign via POST /api/dcs/deposit-closed first");
         }
 
-        String robotId = (req.robotId() != null && !req.robotId().isBlank())
+        String capacityResourceId = (req.robotId() != null && !req.robotId().isBlank())
                 ? req.robotId().trim()
-                : robotTaskProperties.getDefaultRobotId();
+                : (order.getCapacityResourceId() != null && !order.getCapacityResourceId().isBlank()
+                        ? order.getCapacityResourceId()
+                        : (order.getRobotId() != null && !order.getRobotId().isBlank() 
+                                ? order.getRobotId() 
+                                : robotTaskProperties.getDefaultRobotId()));
 
-        SendTaskVtMenRequest.DestinationPayload dest = buildDestination(order, req);
+        String capacityResourceName = (order.getCapacityResourceName() != null && !order.getCapacityResourceName().isBlank())
+                ? order.getCapacityResourceName()
+                : robotTaskProperties.getDefaultCapacityResourceName();
 
-        SendTaskVtMenRequest body = new SendTaskVtMenRequest(
-                order.getOrderCode(),
-                robotId,
-                order.getCompartmentId(),
-                dest
+        CreateSubTaskVo subTask = buildSubTask(order, req);
+
+        String siteId = (order.getMapName() != null && !order.getMapName().isBlank())
+                ? order.getMapName().trim()
+                : robotTaskProperties.getDefaultSiteId();
+
+        CreateTaskAndBeginPayload body = new CreateTaskAndBeginPayload(
+                orderCode,
+                capacityResourceId,
+                capacityResourceName,
+                siteId,
+                java.util.List.of(subTask)
         );
 
         SendTaskVtMenResponse robotBody;
+        String rawBody = null;
         try {
-            ResponseEntity<SendTaskVtMenResponse> entity = robotRestClient.post()
-                    .uri(robotTaskProperties.getSendTaskUrl())
+            ResponseEntity<String> entity = robotRestClient.post()
+                    .uri(robotTaskProperties.getDispatchUrl())
                     .contentType(APPLICATION_JSON_UTF8)
                     .accept(APPLICATION_JSON_UTF8)
                     .body(body)
                     .retrieve()
-                    .toEntity(SendTaskVtMenResponse.class);
+                    .toEntity(String.class);
 
             if (!entity.getStatusCode().is2xxSuccessful()) {
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                         "Robot API returned HTTP " + entity.getStatusCode().value());
             }
-            robotBody = entity.getBody();
+            rawBody = entity.getBody();
+            ObjectMapper mapper = new ObjectMapper();
+            robotBody = mapper.readValue(rawBody, SendTaskVtMenResponse.class);
         } catch (RestClientResponseException e) {
             String hint = e.getResponseBodyAsString();
             if (hint != null && hint.length() > 200) {
@@ -95,17 +113,22 @@ public class RobotDispatchService {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                     "Robot API error: HTTP " + e.getStatusCode().value()
                             + (hint != null && !hint.isBlank() ? " — " + hint : ""));
-        } catch (RestClientException e) {
+        } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
-                    "Robot API unreachable: " + e.getMessage());
+                    "Robot API unreachable or parsing error: " + e.getMessage() + (rawBody != null ? " Raw: " + rawBody : ""));
         }
 
-        if (robotBody == null || robotBody.status() == null
-                || !"SUCCESS".equalsIgnoreCase(robotBody.status())) {
-            String msg = robotBody != null && robotBody.message() != null
-                    ? robotBody.message()
-                    : "Robot did not return SUCCESS";
-            throw new ResponseStatusException(HttpStatus.CONFLICT, msg);
+        boolean isSuccess = false;
+        if (robotBody != null) {
+            if ("SUCCESS".equalsIgnoreCase(robotBody.status())) isSuccess = true;
+            if ("true".equalsIgnoreCase(robotBody.status())) isSuccess = true;
+        }
+
+        if (robotBody == null || !isSuccess) {
+            String msg = robotBody != null ? robotBody.msg() : null;
+            if (msg == null && robotBody != null) msg = robotBody.message();
+            if (msg == null) msg = "Robot did not return SUCCESS";
+            throw new ResponseStatusException(HttpStatus.CONFLICT, msg + " | Raw Response: " + rawBody);
         }
 
         OrderModel updated = orderService.markOrderShipping(orderCode)
@@ -120,33 +143,130 @@ public class RobotDispatchService {
         );
     }
 
-    private SendTaskVtMenRequest.DestinationPayload buildDestination(OrderModel order, DispatchRobotRequest req) {
+    private CreateSubTaskVo buildSubTask(OrderModel order, DispatchRobotRequest req) {
         String fallbackName = robotTaskProperties.getDefaultDestinationName();
         String name = fallbackName;
         if (order.getDestinationName() != null && !order.getDestinationName().isBlank()) {
             name = order.getDestinationName().trim();
         }
-        String addressText = order.getAddress() != null ? order.getAddress().trim() : "";
 
         Optional<DcsDestinationRegistry.Result> canon = dcsDestinationRegistry.resolve(
                 order.getDestinationName(), fallbackName);
         if (canon.isPresent()) {
             name = canon.get().name();
-            addressText = canon.get().addressText();
         }
 
         if (req.destination() != null) {
             if (req.destination().name() != null && !req.destination().name().isBlank()) {
                 name = req.destination().name().trim();
             }
-            if (req.destination().addressText() != null && !req.destination().addressText().isBlank()) {
-                addressText = req.destination().addressText().trim();
-            }
         }
 
-        return new SendTaskVtMenRequest.DestinationPayload(
+        return new CreateSubTaskVo(
+                DcsDestinationRegistry.nfc(name), // Assuming name is ID for now
                 DcsDestinationRegistry.nfc(name),
-                DcsDestinationRegistry.nfc(addressText));
+                0);
+    }
+
+    public void openCompartment(String robotId, int compartmentId) {
+        String rId = (robotId != null && !robotId.isBlank()) ? robotId.trim() : robotTaskProperties.getDefaultRobotId();
+        CabinetMissionOpenPayload body = new CabinetMissionOpenPayload(rId, compartmentId);
+
+        try {
+            ResponseEntity<String> entity = robotRestClient.post()
+                    .uri(robotTaskProperties.getDoorControlUrl())
+                    .contentType(APPLICATION_JSON_UTF8)
+                    .body(body)
+                    .retrieve()
+                    .toEntity(String.class);
+
+            if (!entity.getStatusCode().is2xxSuccessful()) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "Robot Open Door API returned HTTP " + entity.getStatusCode().value());
+            }
+        } catch (RestClientException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Robot Open Door API unreachable: " + e.getMessage());
+        }
+    }
+
+    public void returnToChargingPoint(String robotId, String siteId) {
+        String rId = (robotId != null && !robotId.isBlank()) ? robotId.trim() : robotTaskProperties.getDefaultRobotId();
+        String sId = (siteId != null && !siteId.isBlank()) ? siteId.trim() : robotTaskProperties.getDefaultSiteId();
+        
+        // Use a mock charging point ID as requested
+        String mockChargingPoint = "mock_charging_point_1";
+        CreateSubTaskVo subTask = new CreateSubTaskVo(
+                mockChargingPoint,
+                "Điểm Sạc Giả Lập",
+                0
+        );
+
+        CreateTaskAndBeginPayload body = new CreateTaskAndBeginPayload(
+                "ReturnToCharging_" + System.currentTimeMillis(),
+                rId,
+                robotTaskProperties.getDefaultCapacityResourceName(),
+                sId,
+                java.util.List.of(subTask)
+        );
+
+        try {
+            ResponseEntity<SendTaskVtMenResponse> entity = robotRestClient.post()
+                    .uri(robotTaskProperties.getDispatchUrl())
+                    .contentType(APPLICATION_JSON_UTF8)
+                    .accept(APPLICATION_JSON_UTF8)
+                    .body(body)
+                    .retrieve()
+                    .toEntity(SendTaskVtMenResponse.class);
+
+            if (!entity.getStatusCode().is2xxSuccessful()) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "Robot Return To Charge API returned HTTP " + entity.getStatusCode().value());
+            }
+        } catch (RestClientException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Robot Return To Charge API unreachable: " + e.getMessage());
+        }
+    }
+
+    public void controlTask(String taskId, String action) {
+        String endpoint;
+        switch (action.toLowerCase()) {
+            case "pause":
+                endpoint = "/task/interface/pauseTask";
+                break;
+            case "recover":
+                endpoint = "/task/interface/recoverTask";
+                break;
+            case "cancel":
+                endpoint = "/task/interface/cancelTask";
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown action: " + action);
+        }
+
+        // Extract base URL from dispatchUrl dynamically
+        String fullDispatchUrl = robotTaskProperties.getDispatchUrl();
+        String baseUrl = fullDispatchUrl;
+        int pathIndex = fullDispatchUrl.indexOf("/", fullDispatchUrl.indexOf("://") + 3);
+        if (pathIndex > 0) {
+            baseUrl = fullDispatchUrl.substring(0, pathIndex);
+        }
+        
+        try {
+            ResponseEntity<String> entity = robotRestClient.get()
+                    .uri(baseUrl + endpoint + "?taskId={taskId}", taskId)
+                    .retrieve()
+                    .toEntity(String.class);
+
+            if (!entity.getStatusCode().is2xxSuccessful()) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "Robot " + action + " API returned HTTP " + entity.getStatusCode().value());
+            }
+        } catch (RestClientException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Robot " + action + " API unreachable: " + e.getMessage());
+        }
     }
 
     // --- Request to vtmen backend (optional body from dashboard) ---
@@ -170,21 +290,33 @@ public class RobotDispatchService {
 
     // --- Payload / response for external DCS ---
 
-    private record SendTaskVtMenRequest(
-            @JsonProperty("order_id") String orderId,
-            @JsonProperty("robot_id") String robotId,
-            @JsonProperty("compartment_id") int compartmentId,
-            @JsonProperty("destination") DestinationPayload destination
-    ) {
-        private record DestinationPayload(
-                String name,
-                @JsonProperty("address_text") String addressText
-        ) {}
-    }
+    // --- Payload / response for external DCS ---
 
+    private record CreateSubTaskVo(
+            String parkPointId,
+            String parkPointName,
+            int orderBy
+    ) {}
+
+    private record CreateTaskAndBeginPayload(
+            String taskName,
+            String capacityResourceId,
+            String capacityResourceName,
+            String siteId,
+            java.util.List<CreateSubTaskVo> createSubTaskVoList
+    ) {}
+
+    private record CabinetMissionOpenPayload(
+            String capacityResourceId,
+            int boxIndex
+    ) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private record SendTaskVtMenResponse(
             String status,
             String message,
+            String msg,
+            Integer code,
             @JsonProperty("estimated_time_of_arrival") Integer estimatedTimeOfArrival
     ) {}
 }

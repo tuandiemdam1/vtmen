@@ -5,11 +5,10 @@ import { toast } from "sonner";
 import {
     fetchDcsMapLocations,
     dcsEnvelopeToMapPoints,
-    fetchMapPoints,
     DEFAULT_DCS_MAP_NAME,
     type MapLocationPoint,
+    fetchMapPoints,
 } from "@/lib/api";
-import { getFallbackMapPoints } from "@/lib/locations";
 
 export type UseMapLocationsOptions = {
     // Mongo / DCS map id; defaults to {@link DEFAULT_DCS_MAP_NAME}.
@@ -28,42 +27,42 @@ export function useMapLocations(options: UseMapLocationsOptions = {}) {
 
     useEffect(() => {
         if (!enabled) {
-            setLoading(false);
-            return;
+            const timeoutId = setTimeout(() => setLoading(false), 0);
+            return () => clearTimeout(timeoutId);
         }
         let cancelled = false;
-        setLoading(true);
+        setTimeout(() => {
+            if (!cancelled) setLoading(true);
+        }, 0);
 
         (async () => {
+            let pts: MapLocationPoint[] = [];
             try {
+                const env = await fetchDcsMapLocations(mapName);
+                pts = dcsEnvelopeToMapPoints(env);
+            } catch (error) {
+                console.warn("DCS fetch error, falling back to Mongo:", error);
+            }
+
+            if (!cancelled && pts.length === 0) {
                 try {
-                    const env = await fetchDcsMapLocations(mapName);
-                    const fromDcs = dcsEnvelopeToMapPoints(env);
-                    if (!cancelled && fromDcs.length > 0) {
-                        setLocations(fromDcs);
-                        return;
-                    }
-                } catch {
-                    // DCS proxy unreachable or 502 — try Mongo
+                    pts = await fetchMapPoints(mapName);
+                } catch (mongoError) {
+                    console.error("Mongo fetch error:", mongoError);
                 }
-                try {
-                    const fromMongo = await fetchMapPoints(mapName);
-                    if (!cancelled && fromMongo.length > 0) {
-                        setLocations(fromMongo);
-                        return;
-                    }
-                } catch {
-                    // Mongo failed
+            }
+            
+            if (!cancelled) {
+                if (pts.length > 0) {
+                    setLocations(pts);
+                } else {
+                    setLocations([]);
+                    toast.error("Không thể lấy danh sách địa điểm.");
                 }
-                if (!cancelled) {
-                    const fb = getFallbackMapPoints(mapName);
-                    setLocations(fb);
-                    if (fb.length === 0) {
-                        toast.error("Không tải được danh sách địa điểm.");
-                    }
-                }
-            } finally {
-                if (!cancelled) setLoading(false);
+            }
+            
+            if (!cancelled) {
+                setLoading(false);
             }
         })();
 

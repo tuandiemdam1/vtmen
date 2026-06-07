@@ -4,6 +4,7 @@ export type BackendOrder = {
     id: string;
     createdTime: string;
     completedTime?: string;
+    arrivalTime?: string;
     fullName: string;
     phone: string;
     address: string;
@@ -11,6 +12,7 @@ export type BackendOrder = {
     note: string;
     status: string;
     orderCode: string;
+    pinCode?: string;
     // Campus / place label for robot destination.name when saved from location picker
     destinationName?: string | null;
     // Mongo `maps` key / DCS map id for this order
@@ -30,6 +32,7 @@ function backendCompartmentId(b: BackendOrder): number | null {
 export function mapBackendOrderToFrontend(b: BackendOrder): Order {
     return {
         maDonHang: b.orderCode || b.id,
+        pinCode: b.pinCode,
         sanPham: b.note || "N/A", // Use note for 'sanPham'
         tenKhachHang: b.fullName || "Guest",
         sdt: b.phone || "",
@@ -43,6 +46,7 @@ export function mapBackendOrderToFrontend(b: BackendOrder): Order {
         thoiGianDuKien: "Unknown", // Backend doesn't have estimate time, just use Unknown
         soLuong: b.quantity, // <--- Added mapping for new quantity field
         compartmentId: backendCompartmentId(b),
+        arrivalTime: b.arrivalTime,
     };
 }
 
@@ -52,24 +56,53 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
 export const DEFAULT_DCS_MAP_NAME =
     process.env.NEXT_PUBLIC_DCS_MAP_NAME || "Trường đại học";
 
-export type MapLocationPoint = { id: number; name: string; address: string };
+export type MapLocationPoint = { id: number; name: string; address: string; dockName?: string; dockShowName?: string };
 
-// Same shape as DCS POST `/api/dcs/locations` (via backend `GET /api/maps/dcs`).
-export type DcsMapCoordinates = { lng?: number; lat?: number };
+// Same shape as DCS GET `/task/interface/getParkPointPage`.
 export type DcsMapPoint = {
-    name: string;
-    address: string;
-    coordinates?: DcsMapCoordinates | null;
-    status?: string | null;
+    parkPointId: string;
+    dockName: string;
+    dockShowName?: string;
+    longitude?: number;
+    latitude?: number;
 };
 export type DcsLocationsEnvelope = {
-    status?: number | null;
-    message?: string | null;
+    code?: number | null;
+    msg?: string | null;
     data?: {
-        total_items?: number;
-        points?: DcsMapPoint[];
+        total?: number;
+        records?: DcsMapPoint[];
     } | null;
 };
+
+export type DcsSite = {
+    siteId: string;
+    siteName: string;
+    longitude: number;
+    latitude: number;
+    siteStatus: number;
+};
+
+export type DcsSiteEnvelope = {
+    code?: number | null;
+    msg?: string | null;
+    data?: {
+        total?: number;
+        records?: DcsSite[];
+    } | null;
+};
+
+export async function fetchSites(): Promise<DcsSite[]> {
+    try {
+        const res = await fetch(`${API_BASE}/maps/sites`, { cache: "no-store" });
+        if (!res.ok) throw new Error("Failed to fetch sites");
+        const env: DcsSiteEnvelope = await res.json();
+        return env.data?.records || [];
+    } catch (e) {
+        console.warn("fetchSites API Error:", e instanceof Error ? e.message : String(e));
+        return [];
+    }
+}
 
 function mapQuery(mapName?: string): string {
     return mapName != null && mapName !== ""
@@ -77,7 +110,7 @@ function mapQuery(mapName?: string): string {
         : `?map_name=${encodeURIComponent(DEFAULT_DCS_MAP_NAME)}`;
 }
 
-// Live DCS POIs: Spring POSTs to DCS with `{ map_name }` and returns the same JSON envelope.
+// Live DCS POIs: proxy to DCS GET /task/interface/getParkPointPage
 export async function fetchDcsMapLocations(mapName?: string): Promise<DcsLocationsEnvelope> {
     const url = `${API_BASE}/maps/dcs${mapQuery(mapName)}`;
     const res = await fetch(url, { cache: "no-store" });
@@ -89,15 +122,17 @@ export async function fetchDcsMapLocations(mapName?: string): Promise<DcsLocatio
 
 // Maps DCS-style points to picker rows (coordinates kept on raw envelope if you need them later).
 export function dcsEnvelopeToMapPoints(env: DcsLocationsEnvelope): MapLocationPoint[] {
-    const raw = env?.data?.points;
+    const raw = env?.data?.records;
     if (!raw?.length) return [];
     const out: MapLocationPoint[] = [];
     let i = 0;
     for (const p of raw) {
-        const name = p.name?.trim() ?? "";
-        const address = p.address?.trim() ?? "";
-        if (!name || !address) continue;
-        out.push({ id: i++, name, address });
+        const id = p.parkPointId;
+        const name = (p.dockShowName || p.dockName)?.trim() ?? "";
+        // For backwards compatibility or mapping we use parkPointId as the id and name
+        const address = name; // We just use the name as address for UI picker
+        if (!name) continue;
+        out.push({ id: i++, name: id, address, dockName: p.dockName, dockShowName: p.dockShowName });
     }
     return out;
 }
@@ -119,7 +154,7 @@ export async function fetchActiveOrders(): Promise<Order[]> {
         const data: BackendOrder[] = await res.json();
         return data.map(mapBackendOrderToFrontend);
     } catch (error) {
-        console.error(error);
+        console.warn("fetchActiveOrders API Error:", error instanceof Error ? error.message : String(error));
         return [];
     }
 }
@@ -131,7 +166,7 @@ export async function fetchOrderHistory(): Promise<Order[]> {
         const data: BackendOrder[] = await res.json();
         return data.map(mapBackendOrderToFrontend);
     } catch (error) {
-        console.error(error);
+        console.warn("fetchOrderHistory API Error:", error instanceof Error ? error.message : String(error));
         return [];
     }
 }
@@ -143,7 +178,7 @@ export async function completeOrderApi(id: string): Promise<boolean> {
         });
         return res.ok;
     } catch (error) {
-        console.error(error);
+        console.warn("completeOrderApi API Error:", error instanceof Error ? error.message : String(error));
         return false;
     }
 }
@@ -173,7 +208,7 @@ export async function createOrder(payload: CreateOrderPayload): Promise<BackendO
         const order: BackendOrder = await res.json();
         return order;
     } catch (error) {
-        console.error(error);
+        console.warn("createOrder API Error:", error instanceof Error ? error.message : String(error));
         return null;
     }
 }
@@ -198,7 +233,7 @@ export async function updateOrder(orderId: string, payload: UpdateOrderPayload):
         if (!res.ok) throw new Error("Failed to update order");
         return await res.json();
     } catch (error) {
-        console.error(error);
+        console.warn("updateOrder API Error:", error instanceof Error ? error.message : String(error));
         return null;
     }
 }
@@ -210,7 +245,33 @@ export async function cancelOrder(orderId: string): Promise<boolean> {
         });
         return res.ok;
     } catch (error) {
-        console.error(error);
+        console.warn("cancelOrder API Error:", error instanceof Error ? error.message : String(error));
+        return false;
+    }
+}
+
+export async function confirmOrderPlaced(orderId: string, compartmentId: number): Promise<boolean> {
+    try {
+        const res = await fetch(`${API_BASE}/orders/${encodeURIComponent(orderId)}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "placed", compartmentId }),
+        });
+        return res.ok;
+    } catch (error) {
+        console.warn("confirmOrderPlaced API Error:", error instanceof Error ? error.message : String(error));
+        return false;
+    }
+}
+
+export async function cancelDelivery(orderId: string): Promise<boolean> {
+    try {
+        const res = await fetch(`${API_BASE}/orders/${orderId}/cancel-delivery`, {
+            method: "POST",
+        });
+        return res.ok;
+    } catch (error) {
+        console.warn("cancelDelivery API Error:", error instanceof Error ? error.message : String(error));
         return false;
     }
 }
