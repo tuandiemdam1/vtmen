@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Loader2, Package, User, Phone, MapPin, FileText, Box } from "lucide-react";
+import { Plus, Loader2, Package, User, Phone, Mail, MapPin, FileText, Box } from "lucide-react";
 import {
     Drawer,
     DrawerClose,
@@ -39,6 +39,7 @@ export default function CreateOrderDrawer({
     const [form, setForm] = useState<CreateOrderPayload>({
         fullName: "",
         phone: "",
+        email: "",
         address: "",
         quantity: 1,
         note: "",
@@ -66,7 +67,7 @@ export default function CreateOrderDrawer({
                     className: "!text-green-500 !border-green-600",
                 });
                 setOpen(false);
-                setForm({ fullName: "", phone: "", address: "", quantity: 1, note: "" });
+                setForm({ fullName: "", phone: "", email: "", address: "", quantity: 1, note: "" });
                 onCreated?.();
             } else {
                 toast.error("Không thể tạo đơn hàng. Vui lòng thử lại sau.", {
@@ -137,6 +138,25 @@ export default function CreateOrderDrawer({
                                 onChange={(e) => handleChange("phone", e.target.value)}
                                 className="h-11 rounded-xl border-border/60 bg-muted/30 transition-all focus:bg-background focus:ring-2 focus:ring-primary/20"
                             />
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <Label htmlFor="email" className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                                <Mail className="h-3.5 w-3.5" />
+                                Email
+                                <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">Không bắt buộc</span>
+                            </Label>
+                            <Input
+                                id="email"
+                                type="email"
+                                placeholder="example@gmail.com"
+                                value={form.email ?? ""}
+                                onChange={(e) => handleChange("email", e.target.value)}
+                                className="h-11 rounded-xl border-border/60 bg-muted/30 transition-all focus:bg-background focus:ring-2 focus:ring-primary/20"
+                            />
+                            <p className="text-[11px] text-muted-foreground">
+                                📧 Mã PIN sẽ được gửi đến email này sau khi đặt hàng
+                            </p>
                         </div>
 
                         <div className="space-y-1.5">

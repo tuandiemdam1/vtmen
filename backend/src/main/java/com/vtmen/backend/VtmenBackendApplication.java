@@ -9,7 +9,10 @@ import org.springframework.context.annotation.Bean;
 
 import java.time.LocalDateTime;
 
+import org.springframework.scheduling.annotation.EnableAsync;
+
 @SpringBootApplication
+@EnableAsync
 public class VtmenBackendApplication {
     public static void main(String[] args) {
         SpringApplication.run(VtmenBackendApplication.class, args);

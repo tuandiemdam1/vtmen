@@ -40,6 +40,9 @@ public class RobotDispatchService {
 
     @Autowired
     private DcsDestinationRegistry dcsDestinationRegistry;
+
+    @Autowired
+    private DcsTokenManager dcsTokenManager;
      // POST sendtask to DCS; on SUCCESS marks order {@code shipping}.
      // <p>
      // The JSON sent to DCS is built from the saved order: {@code order_id} = {@link OrderModel#getOrderCode()},
@@ -94,6 +97,7 @@ public class RobotDispatchService {
                     .uri(robotTaskProperties.getDispatchUrl())
                     .contentType(APPLICATION_JSON_UTF8)
                     .accept(APPLICATION_JSON_UTF8)
+                    .header("token", tokenOrEmpty())
                     .body(body)
                     .retrieve()
                     .toEntity(String.class);
@@ -176,6 +180,7 @@ public class RobotDispatchService {
             ResponseEntity<String> entity = robotRestClient.post()
                     .uri(robotTaskProperties.getDoorControlUrl())
                     .contentType(APPLICATION_JSON_UTF8)
+                    .header("token", tokenOrEmpty())
                     .body(body)
                     .retrieve()
                     .toEntity(String.class);
@@ -215,6 +220,7 @@ public class RobotDispatchService {
                     .uri(robotTaskProperties.getDispatchUrl())
                     .contentType(APPLICATION_JSON_UTF8)
                     .accept(APPLICATION_JSON_UTF8)
+                    .header("token", tokenOrEmpty())
                     .body(body)
                     .retrieve()
                     .toEntity(SendTaskVtMenResponse.class);
@@ -256,6 +262,7 @@ public class RobotDispatchService {
         try {
             ResponseEntity<String> entity = robotRestClient.get()
                     .uri(baseUrl + endpoint + "?taskId={taskId}", taskId)
+                    .header("token", tokenOrEmpty())
                     .retrieve()
                     .toEntity(String.class);
 
@@ -267,6 +274,14 @@ public class RobotDispatchService {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                     "Robot " + action + " API unreachable: " + e.getMessage());
         }
+    }
+
+    // --- Helpers ---
+
+    /** Returns the current DCS token, or empty string if not available (allows request to proceed, DCS may reject with 401). */
+    private String tokenOrEmpty() {
+        String t = dcsTokenManager.getToken();
+        return t != null ? t : "";
     }
 
     // --- Request to vtmen backend (optional body from dashboard) ---

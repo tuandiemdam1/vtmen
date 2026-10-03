@@ -5,10 +5,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "vtmen.robot")
 public class RobotTaskProperties {
     // Full URL for DCS dispatch (VtMen).
-    private String dispatchUrl = "http://223.130.11.193:10101/api/task/interface/createTaskAndBegin";
+    private String dispatchUrl = "http://203.145.47.216:8081/api/task/interface/createTaskAndBegin";
 
     // Full URL for DCS open door control.
-    private String doorControlUrl = "http://223.130.11.193:10101/task/interface/cabinetMissionOpen";
+    private String doorControlUrl = "http://203.145.47.216:8081/task/interface/cabinetMissionOpen";
 
     // Used when request does not specify robot_id (capacityResourceId).
     private String defaultRobotId = "1919587605079662593";

@@ -15,6 +15,7 @@ public class OrderModel {
     private String pinCode;
     private String fullName;
     private String phone;
+    private String email; // optional – nhận mã PIN qua email
     private String address;
     // Campus / place name for robot destination (optional; e.g. from location picker).
     private String destinationName;
@@ -78,6 +79,14 @@ public class OrderModel {
 
     public void setPhone(String phone) {
         this.phone = phone;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 
     public String getAddress() {

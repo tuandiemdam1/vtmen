@@ -7,6 +7,7 @@ export type BackendOrder = {
     arrivalTime?: string;
     fullName: string;
     phone: string;
+    email?: string; // optional – email khách hàng
     address: string;
     quantity?: number;
     note: string;
@@ -186,6 +187,7 @@ export async function completeOrderApi(id: string): Promise<boolean> {
 export type CreateOrderPayload = {
     fullName: string;
     phone: string;
+    email?: string; // optional
     address: string;
     destinationName?: string;
     map_name?: string;

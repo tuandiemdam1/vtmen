@@ -38,6 +38,9 @@ public class OrderService {
     @Autowired
     private DcsApiProperties dcsApiProperties;
 
+    @Autowired
+    private EmailService emailService;
+
     // Get order by orderCode
     public Optional<OrderModel> getOrderByOrderCode(String orderCode) {
         return orderRepository.findByOrderCode(orderCode);
@@ -309,6 +312,17 @@ public class OrderService {
         order.setPinCode(String.format("%06d", new java.util.Random().nextInt(1000000)));
         OrderModel saved = orderRepository.save(order);
         publishActiveOrders();
+
+        // Gửi email xác nhận + mã PIN nếu khách hàng cung cấp email
+        if (saved.getEmail() != null && !saved.getEmail().isBlank()) {
+            emailService.sendOrderConfirmation(
+                    saved.getEmail(),
+                    saved.getFullName() != null ? saved.getFullName() : "Khách hàng",
+                    saved.getOrderCode(),
+                    saved.getPinCode()
+            );
+        }
+
         return saved;
     }
 
