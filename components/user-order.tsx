@@ -140,8 +140,8 @@ function OrderCardItem({
                             }`}
                         >
                             {order.compartmentId != null
-                                ? `Compartment ID: ${order.compartmentId}`
-                                : "Compartment ID: null"}
+                                ? `Ngăn tủ: ${order.compartmentId}`
+                                : "Ngăn tủ: Chưa xếp"}
                         </p>
                     )}
                 </ItemContent>

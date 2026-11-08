@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev:all": "node start.mjs",
+    "dev:tunnel": "node start.mjs --tunnel",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

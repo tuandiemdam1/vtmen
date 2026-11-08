@@ -1,65 +1,101 @@
-# vt-fake (VTMen)
+# VTMen — Hệ thống Quản lý & Điều phối Robot Giao hàng
 
-Full-stack app: **Next.js** frontend and **Spring Boot** backend with **MongoDB**, WebSockets (STOMP/SockJS), and optional DCS/robot integrations.
+Ứng dụng Full-stack gồm **Next.js 16 (React 19)** ở Frontend và **Spring Boot 3.5 (Java 17)** ở Backend, sử dụng **MongoDB**, cập nhật thời gian thực qua **WebSocket (STOMP)**, gửi mã PIN qua **Gmail SMTP**, và tích hợp trực tiếp với hệ thống điều khiển robot **DCS**.
 
-## Prerequisites
+---
 
-Install these on your machine before running the project:
+## 1. Yêu cầu cài đặt trên máy mới (Prerequisites)
 
-| Tool | Version (this repo) | Role |
-|------|---------------------|------|
-| **Node.js** | 20.x LTS or newer recommended | Next.js 16 / React 19 |
-| **npm** | Comes with Node | Frontend install and scripts |
-| **Java JDK** | **17** (required by `backend/pom.xml`) | Spring Boot backend |
-| **Apache Maven** | 3.6+ | Build and run the backend |
-| **MongoDB** | 4.4+ or **MongoDB Atlas** | Data store for the backend |
+Đồng nghiệp nhận dự án chỉ cần cài đặt **3 công cụ cơ bản** sau:
 
-Frontend **npm dependencies** are declared in `package.json` (Next.js, React, Tailwind, STOMP/SockJS clients, UI libraries, etc.) and are installed with `npm install`. Backend **Maven dependencies** (Spring Web, WebSocket, Spring Data MongoDB, devtools, tests) are resolved automatically on the first `mvn` run.
+| Công cụ | Phiên bản yêu cầu | Ghi chú |
+| :--- | :--- | :--- |
+| **Node.js** | **20.x LTS** trở lên | Đi kèm `npm` để chạy Frontend và script khởi động |
+| **Java JDK** | **JDK 17** trở lên | Dự án đã có sẵn Maven Wrapper (`mvnw`), **không cần** cài thêm Maven |
+| **MongoDB** | **MongoDB 6.0/7.0** (hoặc **Docker**) | Chạy ở cổng mặc định `27017` hoặc dùng MongoDB Atlas |
 
-## Configuration
+> **Mẹo cho máy chưa cài MongoDB Server:** Nếu máy đã có Docker Desktop, chỉ cần mở terminal tại thư mục dự án và chạy:
+> ```bash
+> docker compose up -d
+> ```
 
-### Backend — MongoDB
+---
 
-The backend expects a MongoDB connection string. In `backend/src/main/resources/application.properties`, `spring.data.mongodb.uri` is empty by default. Set it in either of these ways:
+## 2. Cách chạy nhanh nhất (1-Click trên Windows)
 
-- Edit `application.properties`: `spring.data.mongodb.uri=<your-connection-string>`
-- Or set an environment variable (overrides the file): `SPRING_DATA_MONGODB_URI=<your-connection-string>`
+Sau khi clone hoặc giải nén dự án về máy:
 
-Other backend settings (ports, DCS URLs, `notify.backend.url`, etc.) live in the same `application.properties` file.
+1. **Chạy ở chế độ Local (Khuyên dùng khi phát triển/test trên máy mới):**
+   * Nhấp đúp vào file **`start-local.bat`** (hoặc chạy lệnh `npm run dev:all`).
+   * Script sẽ **tự động**:
+     * Tạo file `.env` từ `.env.example` (nếu chưa có).
+     * Cài đặt thư viện `node_modules` (nếu chạy lần đầu).
+     * Kiểm tra và bật dịch vụ MongoDB.
+     * Giải phóng cổng bị kẹt và khởi chạy đồng thời cả Frontend (`3005`) và Backend (`8085`).
 
-## Run the project
+2. **Chạy kèm Ngrok Tunnel (Khi cần nhận Webhook từ Robot DCS qua Internet):**
+   * Đảm bảo máy đã cài `ngrok` và đăng nhập token (`ngrok config add-authtoken <TOKEN>`).
+   * Cập nhật biến `NGROK_DOMAIN` trong file `.env` (hoặc để trống nếu dùng domain ngẫu nhiên của Ngrok).
+   * Nhấp đúp vào file **`start-tunnel.bat`** (hoặc chạy `npm run dev:tunnel`).
 
-1. **Start MongoDB** (local service or Atlas with network access allowed).
+3. **Truy cập ứng dụng:**
+   * Giao diện Quản trị / Tạo đơn / Điều phối Robot: **http://localhost:3005**
+   * Backend REST API & WebSocket: **http://localhost:8085**
 
-2. **Backend** (from repo root):
+---
 
-   ```bash
-   cd backend
-   mvn spring-boot:run
-   ```
+## 3. Cấu hình biến môi trường (`.env`)
 
-   API and WebSocket typically listen on **http://localhost:8080** (see `server.port` in `application.properties`).
+Khi chạy lần đầu, file `.env` được tự động tạo từ `.env.example`. Bạn có thể tùy chỉnh các thông số trong `.env`:
 
-3. **Frontend** (new terminal, repo root):
+```env
+# Cổng chạy dịch vụ
+FRONTEND_PORT=3005
+BACKEND_PORT=8085
 
-   ```bash
-   npm install
-   npm run dev
-   ```
+# Kết nối MongoDB (Local hoặc MongoDB Atlas URI)
+SPRING_DATA_MONGODB_URI=mongodb://localhost:27017/vtmen
 
-4. Open **http://localhost:3000** in the browser.
+# Địa chỉ API & WebSocket
+NEXT_PUBLIC_API_URL=http://localhost:8085/api
+NEXT_PUBLIC_WS_URL=http://localhost:8085
+NEXT_PUBLIC_DCS_MAP_NAME=@
 
-## Scripts (frontend)
+# Máy chủ điều khiển Robot DCS
+DCS_HOST=203.145.47.216
+DCS_PORT=8081
+DCS_USERNAME=admin
+DCS_PASSWORD=123
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Next.js development server |
-| `npm run build` | Production build |
-| `npm start` | Serve production build |
-| `npm run lint` | ESLint |
+# Cấu hình Gmail SMTP gửi mã PIN mở tủ cho khách hàng
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your-app-password
 
-## Learn more
+# Tên miền tĩnh Ngrok (để trống nếu dùng domain ngẫu nhiên)
+NGROK_DOMAIN=
+```
 
-- Env and infra checklist: `document.txt`
-- [Next.js documentation](https://nextjs.org/docs)
-- [Spring Boot documentation](https://docs.spring.io/spring-boot/documentation.html)
+> **Lưu ý về dữ liệu bản đồ (Seed Data):** Trong lần đầu tiên Backend khởi động với MongoDB mới, `CampusMapStartupSeed` sẽ tự động khởi tạo dữ liệu bản đồ và danh sách điểm đỗ mẫu vào collection `maps` mà không cần import thủ công.
+
+---
+
+## 4. Danh sách câu lệnh (NPM Scripts)
+
+| Lệnh | Mô tả |
+| :--- | :--- |
+| `npm run dev:all` | Khởi chạy tự động cả **Frontend (3005)** + **Backend (8085)** |
+| `npm run dev:tunnel` | Khởi chạy **Frontend** + **Backend** + **Ngrok Tunnel** |
+| `npm run dev` | Chỉ chạy riêng Frontend Next.js |
+| `npm run build` | Build Frontend cho môi trường Production |
+| `npm run lint` | Kiểm tra lỗi cú pháp với ESLint |
+
+---
+
+## 5. Xử lý sự cố thường gặp (Troubleshooting)
+
+1. **Lỗi `Port 3005 / 8085 already in use`**:
+   * Chạy thông qua `start-local.bat` hoặc `npm run dev:all` — script sẽ tự động đóng tiến trình cũ đang chiếm cổng trước khi bật mới.
+2. **Backend báo lỗi kết nối MongoDB (`MongoSocketOpenException`)**:
+   * Mở **Windows Services** (`services.msc`) -> tìm **MongoDB Server** -> bấm **Start**, hoặc chạy `docker compose up -d`.
+3. **Không gửi được Email mã PIN**:
+   * Kiểm tra `MAIL_USERNAME` và `MAIL_PASSWORD` trong `.env`. Lưu ý `MAIL_PASSWORD` phải là **Mật khẩu ứng dụng (App Password) 16 ký tự** của Google, không phải mật khẩu đăng nhập Gmail thông thường.

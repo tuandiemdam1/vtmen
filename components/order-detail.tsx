@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 
 import { useAnimations } from "@/contexts/animation-context";
-import { useOrdersWebSocket } from "@/hooks/use-orders-websocket";
+import { useOrderDetailWebSocket } from "@/hooks/use-orders-websocket";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,11 +80,9 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
     }, [orderId, animationsEnabled]);
 
     // Instant update when this order changes via WebSocket
-    useOrdersWebSocket((updatedOrders) => {
-        const found = updatedOrders.find((o) => o.maDonHang === orderId);
-        if (found) {
-            setOrder(found);
-        }
+    useOrderDetailWebSocket(orderId, (newOrder) => {
+        setOrder(newOrder);
+        setLoading(false);
     });
 
     const handleCancelOrder = async () => {
@@ -245,11 +243,11 @@ export default function OrderDetail({ orderId }: { orderId: string }) {
                         <InfoRow label="Address" value={order.diaChi} />
                         {orderNeedsCompartment(order.trangThai) && (
                             <InfoRow
-                                label="Compartment ID"
+                                label="Ngăn tủ"
                                 value={
                                     order.compartmentId != null
                                         ? String(order.compartmentId)
-                                        : "null"
+                                        : "Chưa xếp"
                                 }
                             />
                         )}

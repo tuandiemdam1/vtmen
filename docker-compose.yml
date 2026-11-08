@@ -1,0 +1,13 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: vtmen-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - vtmen_mongo_data:/data/db
+
+volumes:
+  vtmen_mongo_data:
+

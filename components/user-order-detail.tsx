@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, MessageCircle, Phone, Package, Clock, CheckCircle2, Truck, Send, Box, Loader2, QrCode } from "lucide-react";
 import { orderCompartmentMissing, orderNeedsCompartment, type Order } from "@/lib/orders";
 import { dispatchRobot, fetchActiveOrders, fetchOrderHistory, completeOrderApi } from "@/lib/api";
-import { useOrdersWebSocket } from "@/hooks/use-orders-websocket";
+import { useOrderDetailWebSocket } from "@/hooks/use-orders-websocket";
 import { toast } from "sonner";
 import {
     dispatchSuccess,
@@ -68,9 +68,9 @@ export default function UserOrderDetail({ orderId }: { orderId: string }) {
         loadOrder();
     }, [orderId, animationsEnabled]);
 
-    useOrdersWebSocket((updatedOrders) => {
-        const found = updatedOrders.find((o) => o.maDonHang === orderId);
-        if (found) setOrder(found);
+    useOrderDetailWebSocket(orderId, (newOrder) => {
+        setOrder(newOrder);
+        setLoading(false);
     });
 
     const handleCallDelivery = async () => {
@@ -198,7 +198,7 @@ export default function UserOrderDetail({ orderId }: { orderId: string }) {
                                               order.compartmentId != null
                                                   ? String(order.compartmentId)
                                                   : "—",
-                                          label: "Compartment ID",
+                                          label: "Ngăn tủ",
                                           warn: orderCompartmentMissing(order),
                                       },
                                   ]
@@ -291,37 +291,74 @@ export default function UserOrderDetail({ orderId }: { orderId: string }) {
                         ))}
                     </div>
 
-                    {/* Action */}
-                    {order.trangThai === "placed" && (
-                        <button
-                            type="button"
-                            disabled={callShipLoading || orderCompartmentMissing(order)}
-                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
-                            onClick={handleCallDelivery}
-                        >
-                            {callShipLoading ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                                <Send className="h-4 w-4" />
-                            )}
-                            Gọi giao hàng
-                        </button>
+                    {/* Action buttons based on status */}
+
+                    {/* PENDING: Waiting for postman to deposit */}
+                    {order.trangThai === "pending" && (
+                        <div className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                                <Clock className="h-4 w-4 shrink-0" />
+                                <span className="text-sm font-semibold">Chờ bưu tá gửi hàng vào tủ</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">Bưu tá sẽ nhập mã đơn hàng để mở tủ và bỏ hàng vào. Sau khi đóng tủ, trạng thái sẽ tự động chuyển sang <span className="font-semibold text-foreground">Đã gửi vào tủ</span>.</p>
+                        </div>
                     )}
 
-                    {order.trangThai === "shipping" && order.arrivalTime && (
-                        <button
-                            type="button"
-                            disabled={callShipLoading}
-                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-green-700 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
-                            onClick={handleConfirmTakeOut}
-                        >
-                            {callShipLoading ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                                <CheckCircle2 className="h-4 w-4" />
-                            )}
-                            Xác nhận lấy hàng ra
-                        </button>
+                    {/* PLACED: Can dispatch robot OR pickup directly */}
+                    {order.trangThai === "placed" && (
+                        <div className="flex flex-col gap-2.5">
+                            <button
+                                type="button"
+                                disabled={callShipLoading || orderCompartmentMissing(order)}
+                                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+                                onClick={handleCallDelivery}
+                            >
+                                {callShipLoading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Send className="h-4 w-4" />
+                                )}
+                                Gọi robot giao hàng
+                            </button>
+                            <button
+                                type="button"
+                                disabled={callShipLoading || orderCompartmentMissing(order)}
+                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-green-600/40 bg-green-600/10 py-3 text-sm font-semibold text-green-700 dark:text-green-400 shadow-sm transition-all hover:bg-green-600/20 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+                                onClick={handleConfirmTakeOut}
+                            >
+                                {callShipLoading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <CheckCircle2 className="h-4 w-4" />
+                                )}
+                                Lấy hàng trực tiếp tại tủ
+                            </button>
+                            <p className="text-center text-xs text-muted-foreground">Nhập mã PIN trên màn hình robot để mở tủ, hoặc gọi robot giao đến địa chỉ của bạn</p>
+                        </div>
+                    )}
+
+                    {/* SHIPPING: Robot on the way — customer can still pickup anytime */}
+                    {order.trangThai === "shipping" && (
+                        <div className="flex flex-col gap-2.5">
+                            <div className="flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+                                <Truck className="h-4 w-4 shrink-0 text-primary" />
+                                <span className="text-sm font-medium text-primary">Robot đang trên đường giao hàng</span>
+                            </div>
+                            <button
+                                type="button"
+                                disabled={callShipLoading}
+                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-green-600/40 bg-green-600/10 py-3 text-sm font-semibold text-green-700 dark:text-green-400 shadow-sm transition-all hover:bg-green-600/20 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+                                onClick={handleConfirmTakeOut}
+                            >
+                                {callShipLoading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <CheckCircle2 className="h-4 w-4" />
+                                )}
+                                Lấy hàng trực tiếp tại tủ ngay bây giờ
+                            </button>
+                            <p className="text-center text-xs text-muted-foreground">Bạn có thể nhập mã PIN để lấy hàng bất kỳ lúc nào, kể cả khi robot đang di chuyển</p>
+                        </div>
                     )}
                     
                     {/* PIN Code Display */}
@@ -338,7 +375,8 @@ export default function UserOrderDetail({ orderId }: { orderId: string }) {
                                             {order.pinCode || "------"}
                                         </span>
                                     </div>
-                                    <p className="text-sm font-medium text-muted-foreground">Nhập mã PIN này trên màn hình robot để mở tủ nhận hàng</p>
+                                    <p className="text-sm font-medium text-muted-foreground">Nhập mã PIN này trên màn hình robot để mở tủ nhận hàng bất kỳ lúc nào</p>
+                                    <p className="mt-1 text-xs font-medium text-amber-600 dark:text-amber-500">Lưu ý: Bạn có thể lấy hàng ngay tại xe hoặc gọi robot giao đến. Vui lòng đóng chặt cửa ngăn tủ sau khi lấy hàng để hoàn tất nhận hàng.</p>
                                 </div>
                             ) : null}
                         </div>

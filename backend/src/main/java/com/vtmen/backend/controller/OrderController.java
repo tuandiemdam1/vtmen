@@ -110,13 +110,23 @@ public class OrderController {
             @PathVariable String orderCode,
             @RequestBody StatusUpdateRequest body
     ) {
-        if (body == null || body.status() == null || !"placed".equalsIgnoreCase(body.status())) {
+        if (body == null || body.status() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        return orderService.updateOrderStatusPendingToPlaced(orderCode, body.compartmentId())
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+        if ("placed".equalsIgnoreCase(body.status())) {
+            return orderService.updateOrderStatusPendingToPlaced(orderCode, body.compartmentId())
+                    .map(ResponseEntity::ok)
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        }
+
+        if ("shipping".equalsIgnoreCase(body.status())) {
+            return orderService.markOrderShipping(orderCode)
+                    .map(ResponseEntity::ok)
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        }
+
+        return ResponseEntity.badRequest().build();
     }
 
     // POST /api/orders/{orderCode}/dispatch-robot — Call DCS sendtask; on SUCCESS → shipping

@@ -51,7 +51,46 @@ export function mapBackendOrderToFrontend(b: BackendOrder): Order {
     };
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
+export function getApiBase(): string {
+    const ngrokDomain = process.env.NEXT_PUBLIC_NGROK_DOMAIN?.trim() || "cabalistic-grisly-kolby.ngrok-free.dev";
+    const defaultNgrokApi = `https://${ngrokDomain.replace(/^https?:\/\//, "").replace(/\/+$/, "")}/api`;
+
+    if (typeof window !== "undefined") {
+        const { protocol, hostname } = window.location;
+        const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1";
+
+        if (protocol === "https:") {
+            const envApi = process.env.NEXT_PUBLIC_API_URL?.trim();
+            if (envApi && !envApi.includes("localhost") && !envApi.includes("127.0.0.1") && !envApi.includes("${")) {
+                return envApi.replace(/\/+$/, "");
+            }
+            return defaultNgrokApi;
+        }
+
+        if (!isLocalhost) {
+            const envApi = process.env.NEXT_PUBLIC_API_URL?.trim();
+            if (envApi && !envApi.includes("localhost") && !envApi.includes("127.0.0.1") && !envApi.includes("${")) {
+                return envApi.replace(/\/+$/, "");
+            }
+            const bePort = process.env.NEXT_PUBLIC_BACKEND_PORT?.trim() || "8085";
+            return `http://${hostname}:${bePort}/api`;
+        }
+    }
+
+    const envApi = process.env.NEXT_PUBLIC_API_URL?.trim();
+    if (envApi && !envApi.includes("${")) {
+        return envApi.replace(/\/+$/, "");
+    }
+    return "http://localhost:8085/api";
+}
+
+export const API_BASE = getApiBase();
+
+function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const headers = new Headers(init?.headers);
+    headers.set("ngrok-skip-browser-warning", "true");
+    return fetch(input, { ...init, headers });
+}
 
 // Must match backend `vtmen.dcs.map-name` for the default campus map document in Mongo `maps`.
 export const DEFAULT_DCS_MAP_NAME =
@@ -95,7 +134,7 @@ export type DcsSiteEnvelope = {
 
 export async function fetchSites(): Promise<DcsSite[]> {
     try {
-        const res = await fetch(`${API_BASE}/maps/sites`, { cache: "no-store" });
+        const res = await apiFetch(`${API_BASE}/maps/sites`, { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to fetch sites");
         const env: DcsSiteEnvelope = await res.json();
         return env.data?.records || [];
@@ -114,7 +153,7 @@ function mapQuery(mapName?: string): string {
 // Live DCS POIs: proxy to DCS GET /task/interface/getParkPointPage
 export async function fetchDcsMapLocations(mapName?: string): Promise<DcsLocationsEnvelope> {
     const url = `${API_BASE}/maps/dcs${mapQuery(mapName)}`;
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await apiFetch(url, { cache: "no-store" });
     if (!res.ok) {
         throw new Error(`DCS map proxy failed: ${res.status} ${res.statusText} (${url})`);
     }
@@ -141,7 +180,7 @@ export function dcsEnvelopeToMapPoints(env: DcsLocationsEnvelope): MapLocationPo
 // POIs from Mongo `maps` collection (seed or DCS sync).
 export async function fetchMapPoints(mapName?: string): Promise<MapLocationPoint[]> {
     const url = `${API_BASE}/maps/points${mapQuery(mapName)}`;
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await apiFetch(url, { cache: "no-store" });
     if (!res.ok) {
         throw new Error(`Failed to fetch map points: ${res.status} ${res.statusText} (${url})`);
     }
@@ -150,7 +189,7 @@ export async function fetchMapPoints(mapName?: string): Promise<MapLocationPoint
 
 export async function fetchActiveOrders(): Promise<Order[]> {
     try {
-        const res = await fetch(`${API_BASE}/orders/active`, { cache: "no-store" });
+        const res = await apiFetch(`${API_BASE}/orders/active`, { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to fetch active orders");
         const data: BackendOrder[] = await res.json();
         return data.map(mapBackendOrderToFrontend);
@@ -162,7 +201,7 @@ export async function fetchActiveOrders(): Promise<Order[]> {
 
 export async function fetchOrderHistory(): Promise<Order[]> {
     try {
-        const res = await fetch(`${API_BASE}/orders/history`, { cache: "no-store" });
+        const res = await apiFetch(`${API_BASE}/orders/history`, { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to fetch order history");
         const data: BackendOrder[] = await res.json();
         return data.map(mapBackendOrderToFrontend);
@@ -172,9 +211,22 @@ export async function fetchOrderHistory(): Promise<Order[]> {
     }
 }
 
+export async function fetchOrderByCode(orderCode: string): Promise<Order | null> {
+    if (!orderCode) return null;
+    try {
+        const res = await apiFetch(`${API_BASE}/orders/${encodeURIComponent(orderCode)}`, { cache: "no-store" });
+        if (!res.ok) return null;
+        const data: BackendOrder = await res.json();
+        return mapBackendOrderToFrontend(data);
+    } catch (error) {
+        console.warn("fetchOrderByCode API Error:", error instanceof Error ? error.message : String(error));
+        return null;
+    }
+}
+
 export async function completeOrderApi(id: string): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/orders/${id}/complete`, {
+        const res = await apiFetch(`${API_BASE}/orders/${id}/complete`, {
             method: "POST",
         });
         return res.ok;
@@ -198,7 +250,7 @@ export type CreateOrderPayload = {
 
 export async function createOrder(payload: CreateOrderPayload): Promise<BackendOrder | null> {
     try {
-        const res = await fetch(`${API_BASE}/orders/create`, {
+        const res = await apiFetch(`${API_BASE}/orders/create`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -227,7 +279,7 @@ export type UpdateOrderPayload = {
 
 export async function updateOrder(orderId: string, payload: UpdateOrderPayload): Promise<BackendOrder | null> {
     try {
-        const res = await fetch(`${API_BASE}/orders/${orderId}`, {
+        const res = await apiFetch(`${API_BASE}/orders/${orderId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -242,7 +294,7 @@ export async function updateOrder(orderId: string, payload: UpdateOrderPayload):
 
 export async function cancelOrder(orderId: string): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/orders/${orderId}/cancel`, {
+        const res = await apiFetch(`${API_BASE}/orders/${orderId}/cancel`, {
             method: "POST",
         });
         return res.ok;
@@ -254,7 +306,7 @@ export async function cancelOrder(orderId: string): Promise<boolean> {
 
 export async function confirmOrderPlaced(orderId: string, compartmentId: number): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/orders/${encodeURIComponent(orderId)}/status`, {
+        const res = await apiFetch(`${API_BASE}/orders/${encodeURIComponent(orderId)}/status`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: "placed", compartmentId }),
@@ -268,7 +320,7 @@ export async function confirmOrderPlaced(orderId: string, compartmentId: number)
 
 export async function cancelDelivery(orderId: string): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/orders/${orderId}/cancel-delivery`, {
+        const res = await apiFetch(`${API_BASE}/orders/${orderId}/cancel-delivery`, {
             method: "POST",
         });
         return res.ok;
@@ -295,7 +347,7 @@ export async function dispatchRobot(
     orderCode: string,
     payload?: DispatchRobotPayload
 ): Promise<DispatchRobotResponse> {
-    const res = await fetch(
+    const res = await apiFetch(
         `${API_BASE}/orders/${encodeURIComponent(orderCode)}/dispatch-robot`,
         {
             method: "POST",

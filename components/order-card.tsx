@@ -62,12 +62,13 @@ export default function OrderCard({ onDataChange }: { onDataChange?: () => void 
         setOrders((prev) => {
             const statusChanged =
                 prev.length > 0 &&
-                prev.some((prevOrder) => {
+                (prev.length !== updatedOrders.length ||
+                 prev.some((prevOrder) => {
                     const next = updatedOrders.find(
                         (o) => o.maDonHang === prevOrder.maDonHang
                     );
-                    return next && next.trangThai !== prevOrder.trangThai;
-                });
+                    return !next || next.trangThai !== prevOrder.trangThai;
+                }));
 
             if (statusChanged && onDataChange) {
                 setTimeout(() => onDataChange(), 0);
@@ -131,8 +132,8 @@ export default function OrderCard({ onDataChange }: { onDataChange?: () => void 
                                                 : "text-muted-foreground"
                                         }`}
                                     >
-                                        Compartment ID:{" "}
-                                        {order.compartmentId != null ? order.compartmentId : "null"}
+                                        Ngăn tủ:{" "}
+                                        {order.compartmentId != null ? order.compartmentId : "Chưa xếp"}
                                     </p>
                                 )}
                             </ItemContent>
