@@ -170,6 +170,15 @@ if (withTunnel) {
 freePort(BE_PORT);
 freePort(FE_PORT);
 
+// Clean stale Turbopack cache (.next/dev) that can cause "Access is denied (os error 5)" on Windows
+const nextDevCache = path.join(__dirname, '.next', 'dev');
+if (fs.existsSync(nextDevCache)) {
+  try {
+    fs.rmSync(nextDevCache, { recursive: true, force: true });
+    console.log('🧹 Đã dọn cache .next/dev cũ để tránh lỗi quyền truy cập trên Windows.');
+  } catch {}
+}
+
 console.log(`🚀 Starting Frontend on http://localhost:${FE_PORT} ...`);
 const feArgs = ['run', 'dev', '--', '-p', String(FE_PORT)];
 const fe = spawn(isWin ? 'npm.cmd' : 'npm', feArgs, {

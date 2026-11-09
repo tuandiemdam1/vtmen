@@ -127,12 +127,47 @@ Write-Verbose "Couldn't find MAVEN_HOME, downloading and installing it ..."
 Write-Verbose "Downloading from: $distributionUrl"
 Write-Verbose "Downloading to: $TMP_DOWNLOAD_DIR/$distributionUrlName"
 
-$webclient = New-Object System.Net.WebClient
-if ($env:MVNW_USERNAME -and $env:MVNW_PASSWORD) {
-  $webclient.Credentials = New-Object System.Net.NetworkCredential($env:MVNW_USERNAME, $env:MVNW_PASSWORD)
+$zipFile = "$TMP_DOWNLOAD_DIR/$distributionUrlName"
+$downloaded = $false
+
+# 1. Try built-in Windows curl.exe first (handles TLS 1.3, VPNs, and proxies reliably)
+if (Get-Command "curl.exe" -ErrorAction SilentlyContinue) {
+  try {
+    & curl.exe -fSL --retry 3 --connect-timeout 15 -o "$zipFile" "$distributionUrl"
+    if ($LASTEXITCODE -eq 0 -and (Test-Path "$zipFile")) {
+      $downloaded = $true
+    }
+  } catch {}
 }
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$webclient.DownloadFile($distributionUrl, "$TMP_DOWNLOAD_DIR/$distributionUrlName") | Out-Null
+
+# 2. Fallback to .NET WebClient (with system proxy credentials) and backup mirror
+if (-not $downloaded) {
+  $urlsToTry = @($distributionUrl, "https://archive.apache.org/dist/maven/maven-3/3.9.12/binaries/apache-maven-3.9.12-bin.zip")
+  foreach ($url in $urlsToTry) {
+    try {
+      $webclient = New-Object System.Net.WebClient
+      $webclient.UseDefaultCredentials = $true
+      if ($webclient.Proxy) {
+        $webclient.Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+      }
+      if ($env:MVNW_USERNAME -and $env:MVNW_PASSWORD) {
+        $webclient.Credentials = New-Object System.Net.NetworkCredential($env:MVNW_USERNAME, $env:MVNW_PASSWORD)
+      }
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+      $webclient.DownloadFile($url, "$zipFile") | Out-Null
+      if (Test-Path "$zipFile") {
+        $downloaded = $true
+        break
+      }
+    } catch {
+      Write-Warning "Download failed from $url : $($_.Exception.Message)"
+    }
+  }
+}
+
+if (-not $downloaded) {
+  Write-Error "Failed to download Apache Maven from $distributionUrl. Please check your internet/VPN connection."
+}
 
 # If specified, validate the SHA-256 sum of the Maven distribution zip file
 $distributionSha256Sum = (Get-Content -Raw "$scriptDir/.mvn/wrapper/maven-wrapper.properties" | ConvertFrom-StringData).distributionSha256Sum
@@ -147,7 +182,12 @@ if ($distributionSha256Sum) {
 }
 
 # unzip and move
-Expand-Archive "$TMP_DOWNLOAD_DIR/$distributionUrlName" -DestinationPath "$TMP_DOWNLOAD_DIR" | Out-Null
+try {
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  [System.IO.Compression.ZipFile]::ExtractToDirectory("$zipFile", "$TMP_DOWNLOAD_DIR")
+} catch {
+  Expand-Archive "$zipFile" -DestinationPath "$TMP_DOWNLOAD_DIR" -Force | Out-Null
+}
 
 # Find the actual extracted directory name (handles snapshots where filename != directory name)
 $actualDistributionDir = ""
